@@ -1,0 +1,15 @@
+<launch> 
+<!-- start the cartographer node -->
+
+ <node name="cartographer_node" pkg="cartographer_ros" type="cartographer_node" respawn="true" output="screen"
+       args="
+          -configuration_basename br.lua
+	  -configuration_directory $(find cartographer_ros)/configuration_files">
+  
+  <!-- <remap from="points2" to="/rslidar_points"/> -->
+  <!-- <remap from="points2" to="/rslidar_points_single"/> -->
+  <remap from="scan_1" to="/front_scan"/>
+  <remap from="scan_2" to="/rear_scan"/>
+ </node>
+
+</launch>

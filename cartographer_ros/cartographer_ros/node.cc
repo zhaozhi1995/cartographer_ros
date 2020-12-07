@@ -742,6 +742,10 @@ bool Node::FinishTrajectory(const int trajectory_id) {
          cartographer_ros_msgs::StatusCode::OK;
 }
 
+bool Node::FinishLastTrajectory() {
+  return FinishTrajectory(map_builder_bridge_.GetTrajectoryStates().size()-1);
+}
+
 void Node::RunFinalOptimization() {
   {
     for (const auto& entry : map_builder_bridge_.GetTrajectoryStates()) {

@@ -15,23 +15,23 @@
 -->
 
 <launch>
+  <param name="/use_sim_time" value="true" />
+  <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/cartographer/b3-2016-04-05-15-52-20.bag"/> -->
+  <arg name="bag_filename" default="/home/movejbot/bag/5f.bag"/>
+  
   <param name="robot_description"
-    textfile="$(find cartographer_ros)/urdf/eva.urdf" />
+    textfile="$(find cartographer_ros)/urdf/movexbot.urdf" />
 
   <node name="robot_state_publisher" pkg="robot_state_publisher"
     type="robot_state_publisher" />
 
-  <node name="cartographer_node" pkg="cartographer_ros"
-      type="cartographer_node" args="
-          -map_folder_path $(env WORK_PATH)/Map/
-          -configuration_directory $(find cartographer_ros)/configuration_files
-          -configuration_basename backpack_2d.lua
-          -configuration_basename_localization backpack_2d_localization.lua"
-      output="screen">
-    <remap from="echoes" to="horizontal_laser_2d" />
-    <remap from="points2" to="horizontal_laser_3d" />
-  </node>
+  <include file="$(find cartographer_ros)/launch/movexbot.launch" />
 
-  <node name="cartographer_occupancy_grid_node" pkg="cartographer_ros"
-      type="cartographer_occupancy_grid_node" args="-resolution 0.05" />
+  <!-- <node name="rviz" pkg="rviz" type="rviz" required="true"
+      args="-d $(find cartographer_ros)/configuration_files/demo_2d.rviz" /> -->
+  <node name="playbag" pkg="rosbag" type="play"
+      args="--clock -r 1 -s 0 $(arg bag_filename)" >
+      <remap from="/kitti/velo/pointcloud" to="/points2"/>
+      <remap from="/kitti/oxts/imu" to="/imu"/>
+  </node>
 </launch>

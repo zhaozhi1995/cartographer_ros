@@ -14,6 +14,11 @@
  * limitations under the License.
  */
 
+#define USE_MANAGER
+
+#ifdef USE_MANAGER
+#include "cartographer_ros/node_manager.hpp"
+#else
 #include "absl/memory/memory.h"
 #include "cartographer/mapping/map_builder.h"
 #include "cartographer_ros/node.h"
@@ -43,6 +48,7 @@ DEFINE_bool(
 DEFINE_string(
     save_state_filename, "",
     "If non-empty, serialize state and write it to disk before shutting down.");
+#endif
 
 namespace cartographer_ros {
 namespace {
@@ -94,7 +100,16 @@ int main(int argc, char** argv) {
   ::ros::init(argc, argv, "cartographer_node");
   ::ros::start();
 
+#ifdef USE_MANAGER
+  constexpr double kTfBufferCacheTimeInSeconds = 10.;
+  tf2_ros::Buffer tf_buffer{::ros::Duration(kTfBufferCacheTimeInSeconds)};
+  tf2_ros::TransformListener tf(tf_buffer);
+  cartographer_ros::Manager manager(&tf_buffer);
+  ::ros::spin();
+#else
   cartographer_ros::ScopedRosLogSink ros_log_sink;
   cartographer_ros::Run();
+#endif
+
   ::ros::shutdown();
 }

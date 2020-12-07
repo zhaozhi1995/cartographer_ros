@@ -15,13 +15,16 @@
 -->
 
 <launch>
-  <arg name="bag_filenames"/>
+<arg name="bag_filenames" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/3d/kitti_2011_09_30_drive_0028_synced_imu_velo.bag"/>
   <arg name="no_rviz" default="false"/>
   <arg name="rviz_config" default="$(find cartographer_ros)/configuration_files/demo_3d.rviz"/>
   <arg name="configuration_directory" default="$(find cartographer_ros)/configuration_files"/>
   <arg name="configuration_basenames" default="backpack_3d.lua"/>
   <arg name="urdf_filenames" default="$(find cartographer_ros)/urdf/backpack_3d.urdf"/>
   <arg name="launch_prefix" default=""/>
+
+  <remap from="/points2" to="/kitti/velo/pointcloud"/>
+  <remap from="/imu" to="/kitti/oxts/imu"/>
 
   <remap from="points2_1" to="horizontal_laser_3d" />
   <remap from="points2_2" to="vertical_laser_3d" />

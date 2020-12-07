@@ -57,11 +57,13 @@
   <depend>roslib</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>tf</depend>
   <depend>tf2</depend>
   <depend>tf2_eigen</depend>
   <depend>tf2_ros</depend>
   <depend>urdf</depend>
   <depend>visualization_msgs</depend>
+  <depend>skyee_msg</depend>
 
   <test_depend>rosunit</test_depend>
 

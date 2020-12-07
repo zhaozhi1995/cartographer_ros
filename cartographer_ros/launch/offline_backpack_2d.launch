@@ -15,14 +15,17 @@
 -->
 
 <launch>
-  <arg name="bag_filenames"/>
+  <!-- <arg name="bag_filenames" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/cartographer/b3-2016-04-05-13-54-42.bag"/> -->
+  <arg name="bag_filenames" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/2020-11-16-17-35-11-no_tf.bag"/>
   <arg name="no_rviz" default="false"/>
   <arg name="rviz_config" default="$(find cartographer_ros)/configuration_files/demo_2d.rviz"/>
   <arg name="configuration_directory" default="$(find cartographer_ros)/configuration_files"/>
   <arg name="configuration_basenames" default="backpack_2d.lua"/>
-  <arg name="urdf_filenames" default="$(find cartographer_ros)/urdf/backpack_2d.urdf"/>
+  <arg name="urdf_filenames" default="$(find cartographer_ros)/urdf/movexbot.urdf"/>
   <arg name="launch_prefix" default=""/>
 
+  <remap from="/scan" to="/nav_scan"/>
+  <remap from="points2" to="horizontal_laser_3d" />
   <remap from="echoes" to="horizontal_laser_2d"/>
   <include file="$(find cartographer_ros)/launch/offline_node.launch">
     <arg name="bag_filenames" value="$(arg bag_filenames)"/>

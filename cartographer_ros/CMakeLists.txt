@@ -27,11 +27,13 @@ set(PACKAGE_DEPENDENCIES
   roslib
   sensor_msgs
   std_msgs
+  tf
   tf2
   tf2_eigen
   tf2_ros
   urdf
   visualization_msgs
+  skyee_msg
 )
 
 if(WIN32)
@@ -43,7 +45,7 @@ endif()
 # PCL also finds Boost. Work around by moving before find_package(cartographer).
 find_package(Boost REQUIRED COMPONENTS system iostreams)
 find_package(PCL REQUIRED COMPONENTS common)
-
+find_package(OpenCV)
 find_package(cartographer REQUIRED)
 include("${CARTOGRAPHER_CMAKE_DIR}/functions.cmake")
 option(BUILD_GRPC "build features that require Cartographer gRPC support" false)
@@ -86,6 +88,7 @@ catkin_package(
     EIGEN3
     Boost
     urdfdom_headers
+    OpenCV
   INCLUDE_DIRS "."
   LIBRARIES ${PROJECT_NAME}
 )
@@ -105,6 +108,7 @@ add_library(${PROJECT_NAME} STATIC ${ALL_SRCS})
 add_subdirectory("cartographer_ros")
 
 target_link_libraries(${PROJECT_NAME} PUBLIC cartographer)
+target_link_libraries(${PROJECT_NAME} PUBLIC ${OpenCV_LIBS})
 
 # Lua
 target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC ${LUA_INCLUDE_DIR})

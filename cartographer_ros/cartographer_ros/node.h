@@ -64,6 +64,8 @@ class Node {
   Node(const Node&) = delete;
   Node& operator=(const Node&) = delete;
 
+  bool FinishLastTrajectory();
+
   // Finishes all yet active trajectories.
   void FinishAllTrajectories();
   // Finishes a single given trajectory. Returns false if the trajectory did not
