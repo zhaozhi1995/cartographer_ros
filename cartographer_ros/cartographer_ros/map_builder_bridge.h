@@ -23,6 +23,7 @@
 #include <unordered_map>
 
 #include "absl/synchronization/mutex.h"
+#include "cartographer/io/submap_painter.h"
 #include "cartographer/mapping/map_builder_interface.h"
 #include "cartographer/mapping/pose_graph_interface.h"
 #include "cartographer/mapping/proto/trajectory_builder_options.pb.h"
@@ -71,6 +72,60 @@ class MapBuilderBridge {
 
   MapBuilderBridge(const MapBuilderBridge&) = delete;
   MapBuilderBridge& operator=(const MapBuilderBridge&) = delete;
+
+  //add by zz
+  std::map<::cartographer::mapping::SubmapId, ::cartographer::io::SubmapSlice> submap_slices_;
+  std::map<::cartographer::mapping::SubmapId, ::cartographer::io::SubmapSlice> *GetSubmapSlice()
+  {
+    // Keep track of submap IDs that don't appear in the message anymore.
+    std::set<::cartographer::mapping::SubmapId> submap_ids_to_delete;
+    for (auto& pair : submap_slices_) {
+      submap_ids_to_delete.insert(pair.first);
+    }
+    for (const auto& submap_id_pose : map_builder_->pose_graph()->GetAllSubmapPoses())
+    {
+      ::cartographer::mapping::SubmapId submap_id{submap_id_pose.id.trajectory_id,
+                                                submap_id_pose.id.submap_index};
+      submap_ids_to_delete.erase(submap_id);
+      ::cartographer::io::SubmapSlice& submap_slice = submap_slices_[submap_id];
+      submap_slice.pose = submap_id_pose.data.pose;
+      submap_slice.metadata_version = submap_id_pose.data.version;
+      if (submap_slice.surface != nullptr &&
+          submap_slice.version == submap_id_pose.data.version) 
+      continue;
+
+      ::cartographer::mapping::proto::SubmapQuery::Response response_proto;
+      const std::string error = map_builder_->SubmapToProto(submap_id, &response_proto);
+      if (!error.empty()) 
+      {
+        LOG(ERROR) << error;
+        submap_ids_to_delete.insert(submap_id);
+        continue;
+      }
+      const auto& texture_proto = response_proto.textures().begin();
+      ::cartographer::io::SubmapTexture texture = {
+          ::cartographer::io::UnpackTextureData(texture_proto->cells(), texture_proto->width(),
+                                                texture_proto->height()),
+          texture_proto->width(), texture_proto->height(), texture_proto->resolution(),
+          ::cartographer::transform::ToRigid3(texture_proto->slice_pose())};
+
+      submap_slice.version = response_proto.submap_version();
+      submap_slice.width = texture.width;
+      submap_slice.height = texture.height;
+      submap_slice.slice_pose = texture.slice_pose;
+      submap_slice.resolution = texture.resolution;
+      submap_slice.cairo_data.clear();
+      submap_slice.surface = ::cartographer::io::DrawTexture(
+          texture.pixels.intensity, texture.pixels.alpha,
+          texture.width, texture.height,
+          &submap_slice.cairo_data);
+    }
+    // Delete all submaps that didn't appear in the message.
+    for (const auto& id : submap_ids_to_delete) {
+      submap_slices_.erase(id);
+    }
+    return &submap_slices_;
+  }
 
   void LoadState(const std::string& state_filename, bool load_frozen_state);
   int AddTrajectory(

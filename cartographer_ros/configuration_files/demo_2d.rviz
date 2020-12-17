@@ -4,7 +4,6 @@ Panels:
     Name: Displays
     Property Tree Widget:
       Expanded:
-        - /Submaps1
         - /Submaps1/Submaps1
       Splitter Ratio: 0.600670993
     Tree Height: 747
@@ -26,7 +25,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: LaserScan
+    SyncSource: PointCloud2
 Toolbars:
   toolButtonStyle: 2
 Visualization Manager:
@@ -117,7 +116,7 @@ Visualization Manager:
       Value: true
       Visual Enabled: true
     - Class: Submaps
-      Enabled: true
+      Enabled: false
       Fade-out distance: 1
       High Resolution: true
       Low Resolution: false
@@ -126,26 +125,10 @@ Visualization Manager:
       Submaps:
         All: true
         All Submap Pose Markers: true
-        Trajectory 0:
-          0.180: true
-          1.180: true
-          2.180: true
-          3.180: true
-          4.180: true
-          5.180: true
-          6.125: true
-          7.35: true
-          Submap Pose Markers: true
-          Value: true
-        Trajectory 1:
-          0.140: true
-          1.50: true
-          Submap Pose Markers: true
-          Value: true
       Topic: /submap_list
       Tracking frame: base_link
       Unreliable: false
-      Value: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -158,7 +141,7 @@ Visualization Manager:
       Color: 0; 255; 0
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: false
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Max Intensity: 4096
@@ -175,14 +158,13 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
     - Class: rviz/MarkerArray
       Enabled: true
       Marker Topic: /trajectory_node_list
       Name: Trajectories
       Namespaces:
         Trajectory 0: true
-        Trajectory 1: true
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
@@ -228,12 +210,12 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: Intensity
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 276
+      Max Intensity: 302
       Min Color: 0; 0; 0
-      Min Intensity: 120
+      Min Intensity: 108
       Name: LaserScan
       Position Transformer: XYZ
       Queue Size: 10
@@ -245,7 +227,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 100; 100; 100
@@ -280,11 +262,11 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Scale: 16.6235485
+      Scale: 30.7228222
       Target Frame: base_link
       Value: TopDownOrtho (rviz)
-      X: 14.7204857
-      Y: 8.00699043
+      X: 0.775096357
+      Y: -0.771766722
     Saved: ~
 Window Geometry:
   Displays:

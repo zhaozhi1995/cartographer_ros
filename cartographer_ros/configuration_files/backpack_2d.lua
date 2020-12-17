@@ -20,7 +20,7 @@ options = {
   trajectory_builder = TRAJECTORY_BUILDER,
   map_frame = "map",
   tracking_frame = "base_link",
-  published_frame = "odom_link",
+  published_frame = "base_link",
   odom_frame = "odom",
   provide_odom_frame = true,
   publish_frame_projected_to_2d = false,
@@ -28,9 +28,9 @@ options = {
   use_odometry = false,
   use_nav_sat = false,
   use_landmarks = false,
-  num_laser_scans = 1,
-  num_multi_echo_laser_scans = 0,
-  num_subdivisions_per_laser_scan = 1,
+  num_laser_scans = 0,
+  num_multi_echo_laser_scans = 1,
+  num_subdivisions_per_laser_scan = 10,
   num_point_clouds = 0,
   lookup_transform_timeout_sec = 0.2,
   submap_publish_period_sec = 0.3,
@@ -45,8 +45,6 @@ options = {
 }
 
 MAP_BUILDER.use_trajectory_builder_2d = true
--- TRAJECTORY_BUILDER_2D.num_accumulated_range_data = 50
--- TRAJECTORY_BUILDER_2D.submaps.grid_options_2d.resolution = 0.1 --地图占有栅格分辨率
--- TRAJECTORY_BUILDER_2D.min_z = 0.1;
--- TRAJECTORY_BUILDER_2D.max_z = 1;
+TRAJECTORY_BUILDER_2D.num_accumulated_range_data = 10
+
 return options

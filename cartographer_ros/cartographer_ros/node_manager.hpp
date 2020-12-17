@@ -1,6 +1,7 @@
 #include "absl/memory/memory.h"
 #include "cartographer/mapping/map_builder.h"
 #include "cartographer/io/status.h"
+#include "cartographer/io/submap_painter.h"
 #include "cartographer_ros/node.h"
 #include "cartographer_ros/node_options.h"
 #include "cartographer_ros/ros_log_sink.h"
@@ -21,6 +22,7 @@
 #include "skyee_msg/robotPos.h"
 #include "std_msgs/Bool.h"
 #include "ros/wall_timer.h"
+#include <syscall.h>
 
 DEFINE_bool(collect_metrics, false,
             "Activates the collection of runtime metrics. If activated, the "
@@ -46,14 +48,17 @@ DEFINE_bool(start_trajectory_with_default_topics, true,
             "Enable to immediately start the first trajectory with default topics.");
 DEFINE_string(save_state_filename, "",
             "If non-empty, serialize state and write it to disk before shutting down.");
+DEFINE_double(resolution, 0.05,
+              "Resolution of a grid cell in the published occupancy grid.");
 
 namespace cartographer_ros {
 
-namespace carto = ::cartographer;
-using carto::transform::Rigid3d;
+using ::cartographer::transform::Rigid3d;
 using TrajectoryState = ::cartographer::mapping::PoseGraphInterface::TrajectoryState;
+using ::cartographer::io::SlamState;
+using ::cartographer::mapping::SubmapId;
+using ::cartographer::io::SubmapSlice;
 #define slam_state_ ::cartographer::io::slam_state
-typedef cartographer::io::SlamState SlamState;
 
 class Manager
 {
@@ -62,13 +67,14 @@ private:
   NodeOptions node_options;
   TrajectoryOptions trajectory_options,trajectory_options_localization;
   tf2_ros::Buffer* tf_buffer_;
-  ros::Subscriber initial_pose_sub_,initial_grid_pose_sub_,robot_pose_sub_,slam_state_sub_,map_sub_;
-  ros::Publisher map_android_pub_,mapping_map_info_,robot_grid_pos_pub_,start_pub_,close_pub_;
+  ros::Subscriber initial_pose_sub_,initial_grid_pose_sub_,robot_pose_sub_,slam_state_sub_;
+  ros::Publisher map_android_pub_,mapping_map_info_,robot_grid_pos_pub_,map_pub_,start_pub_,close_pub_;
   ros::NodeHandle nh;
-  nav_msgs::OccupancyGrid saved_map_;
   skyee_msg::mapAndroid map_android_;
   uint32_t app_map_size_max_;
   tf::StampedTransform current_pose_;
+  ros::WallTimer map_publisher_timer_;
+  float mapping_resolution_;
 
   void StartMapping(std::string map_name,uint32_t app_map_size_max);
   void CloseMapping(std::string map_name);
@@ -77,10 +83,11 @@ private:
   void SetInitialPose(const geometry_msgs::Pose &pose);
   void SaveMap(std::string map_name);
   cv::Mat OccupancyGridToMat(const nav_msgs::OccupancyGrid &map);
+  std::unique_ptr<nav_msgs::OccupancyGrid> GetOccupancyGridMap(float resolution);
   void HandleInitialPose(const geometry_msgs::PoseWithCovarianceStamped &pose_msg);
   void HandleSlamState(const skyee_msg::androidConsole &msg);
-  void HandleGetMap(const nav_msgs::OccupancyGrid &map);
   void HandleRobotPose(const geometry_msgs::PoseStamped &pose);
+  void MapPublish(const ::ros::WallTimerEvent& unused_timer_event);
 public:
   Manager(tf2_ros::Buffer* tf_buffer)
   {
@@ -94,6 +101,9 @@ public:
     robot_grid_pos_pub_ = nh.advertise<skyee_msg::robotPos>("robot_pos", 1);
     close_pub_ = nh.advertise<std_msgs::Bool>("cartographer_complete", 1, true);
     start_pub_ = nh.advertise<std_msgs::Bool>("cartographer_start", 1, true);
+    map_pub_ = nh.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
+    map_publisher_timer_ = nh.createWallTimer(ros::WallDuration(1),&Manager::MapPublish, this);
+    map_publisher_timer_.stop();
   };
   ~Manager(){}
 };
@@ -140,49 +150,7 @@ void Manager::HandleSlamState(const skyee_msg::androidConsole &msg)
   }
 }
 
-void Manager::HandleGetMap(const nav_msgs::OccupancyGrid &map)
-{
-  if(slam_state_ != SlamState::SLAM_STATE_MAPPING)
-  {
-    map_sub_.shutdown();
-    robot_pose_sub_.shutdown();
-    return;
-  }
-
-  saved_map_ = map;
-
-  // pub map to APP
-  cv::Mat mat = OccupancyGridToMat(map);
-  float resolution_ratio = sqrt((float)(mat.cols*mat.rows) / app_map_size_max_);
-  float new_resolution = map.info.resolution;
-  if(resolution_ratio > 1)
-  {
-    cv::resize(mat,mat,cv::Size(mat.cols/resolution_ratio, mat.rows/resolution_ratio),cv::INTER_NEAREST);
-    new_resolution = map.info.resolution * resolution_ratio;
-  }
-  // ROS_ERROR("size:%d,resolution:%f",mat.cols*mat.rows,map.info.resolution * resolution_ratio);
-  // cv::imshow("aa",mat);
-  // cv::waitKey(1);
-  std::vector<uchar> data_encode;
-  cv::imencode(".png", mat, data_encode);
-  map_android_.width = mat.cols;
-  map_android_.height = mat.rows;
-  map_android_.resolution = new_resolution;
-  map_android_.originX = round(map.info.origin.position.x / map_android_.resolution);
-  map_android_.originY = round(map.info.origin.position.y / map_android_.resolution);;
-  map_android_.data = data_encode;
-  map_android_pub_.publish(map_android_);
-  
-  skyee_msg::mapInfo map_info;
-  map_info.gridWidth = map_android_.width;
-  map_info.gridHeight = map_android_.height;
-  map_info.resolution = map_android_.resolution;
-  map_info.originX = map_android_.originX;
-  map_info.originY = map_android_.originY;
-  mapping_map_info_.publish(map_info);
-}
-
-void Manager::HandleRobotPose(const geometry_msgs::PoseStamped &pose)
+void Manager::HandleRobotPose(const geometry_msgs::PoseStamped &pose) //only for mapping mode
 {
   static skyee_msg::robotPos robot_grid_pose;
   robot_grid_pose.angle = tf::getYaw(pose.pose.orientation);
@@ -196,25 +164,75 @@ void Manager::HandleRobotPose(const geometry_msgs::PoseStamped &pose)
   robot_grid_pos_pub_.publish(robot_grid_pose);
 }
 
+void Manager::MapPublish(const ::ros::WallTimerEvent& unused_timer_event)
+{
+  if(slam_state_ != SlamState::SLAM_STATE_MAPPING)
+  {
+    map_publisher_timer_.stop();
+    return;
+  }
+  std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(mapping_resolution_);
+  if(map->data.empty())
+  {
+    ROS_ERROR("empty data of map!!");
+    return;
+  }
+
+  //update mapping resolution
+  // ROS_ERROR("map size:(%d,%d)%d,resolution:%f",map->info.width,map->info.height,map->data.size(),map->info.resolution);
+  if(map->data.size() > app_map_size_max_)
+  {
+    mapping_resolution_ += 0.01;
+    // ROS_INFO("update resolution:%f",mapping_resolution_);
+  }
+  cv::Mat mat = OccupancyGridToMat(*map);
+  std::vector<uchar> data_encode;
+  cv::imencode(".png", mat, data_encode);
+  map_android_.width = mat.cols;
+  map_android_.height = mat.rows;
+  map_android_.resolution = map->info.resolution;
+  map_android_.originX = round(map->info.origin.position.x / map_android_.resolution);
+  map_android_.originY = round(map->info.origin.position.y / map_android_.resolution);
+  map_android_.data = data_encode;
+  map_android_pub_.publish(map_android_);
+  
+  skyee_msg::mapInfo map_info;
+  map_info.gridWidth = map_android_.width;
+  map_info.gridHeight = map_android_.height;
+  map_info.resolution = map_android_.resolution;
+  map_info.originX = map_android_.originX;
+  map_info.originY = map_android_.originY;
+  mapping_map_info_.publish(map_info);
+
+  map_pub_.publish(*map);
+}
+
+std::unique_ptr<nav_msgs::OccupancyGrid> Manager::GetOccupancyGridMap(float resolution)
+{
+  auto &submap_slices = *(node_->GetMapBuilderBridge()->GetSubmapSlice());
+  auto painted_slices = PaintSubmapSlices(submap_slices, resolution);
+  return CreateOccupancyGridMsg(painted_slices, resolution, node_options.map_frame, ros::Time::now());
+}
+
 void Manager::StartMapping(std::string map_name,uint32_t app_map_size_max)
 {
   ROS_INFO("start mapping!map_name:%s",map_name.c_str());
   if(node_)
     node_.reset();
+  app_map_size_max_ = app_map_size_max * 10; //png compress will decrease data size tenfold
   slam_state_ = SlamState::SLAM_STATE_MAPPING;
   auto map_builder = cartographer::mapping::CreateMapBuilder(node_options.map_builder_options);
-  node_ = boost::shared_ptr<Node>(new Node(node_options, std::move(map_builder), tf_buffer_,
-            FLAGS_collect_metrics));
+  node_ = boost::shared_ptr<Node>(new Node(node_options, std::move(map_builder), tf_buffer_,FLAGS_collect_metrics));
   if(!map_name.empty() && boost::filesystem::exists(FLAGS_map_folder_path + map_name + "/" + map_name + ".pbstream")) //extend map
+  {
     node_->LoadState(FLAGS_map_folder_path + map_name + "/" + map_name + ".pbstream",FLAGS_load_frozen_state);
-  if (FLAGS_start_trajectory_with_default_topics) {
-    node_->StartTrajectoryWithDefaultTopics(trajectory_options);
+    std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(FLAGS_resolution);
+    mapping_resolution_ = sqrt((float)map->data.size() / app_map_size_max_) * FLAGS_resolution;
   }
-
-  //start uploading map to APP
-  app_map_size_max_ = app_map_size_max;
-  saved_map_.data.clear();
-  map_sub_ = nh.subscribe("/map", 1, &Manager::HandleGetMap,this);
+  else
+    mapping_resolution_ = FLAGS_resolution;
+  node_->StartTrajectoryWithDefaultTopics(trajectory_options);
+  map_publisher_timer_.start();
   robot_pose_sub_ = nh.subscribe("/tracked_pose",1, &Manager::HandleRobotPose,this);
 }
 
@@ -223,8 +241,8 @@ void Manager::CloseMapping(std::string map_name)
   ROS_INFO("close mapping!map name:%s",map_name.c_str());
   if(!node_)
     return;
-  map_sub_.shutdown();
   robot_pose_sub_.shutdown();
+  map_publisher_timer_.stop();
   node_->FinishAllTrajectories();
 
   if (!map_name.empty() && !FLAGS_map_folder_path.empty()) 
@@ -255,6 +273,8 @@ void Manager::StartLocalization(std::string map_name)
             FLAGS_collect_metrics));
   node_->LoadState(FLAGS_map_folder_path + map_name + "/" + map_name + ".pbstream",
                   FLAGS_load_frozen_state);
+  std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(FLAGS_resolution);
+  map_pub_.publish(*map);
   if (FLAGS_start_trajectory_with_default_topics) {
     node_->StartTrajectoryWithDefaultTopics(trajectory_options_localization);
   }
@@ -295,15 +315,14 @@ void Manager::SetInitialPose(const geometry_msgs::Pose &initial_pose)
 void Manager::SaveMap(std::string map_name)
 {
   std::string map_name_folder_path = FLAGS_map_folder_path + map_name;
-  ROS_DEBUG("map_name_folder_path:%s",map_name_folder_path.c_str());
+  ROS_INFO("map_name_folder_path:%s",map_name_folder_path.c_str());
   if(access(map_name_folder_path.c_str(),0) != 0)
     mkdir(map_name_folder_path.c_str(),S_IRWXU | S_IRWXG | S_IRWXO);
   node_->SerializeState(map_name_folder_path + "/" + map_name + ".pbstream",true /* include_unfinished_submaps */);
   
   /*******************save png****************/
-  if(saved_map_.data.empty())
-    ROS_ERROR("saved_map data is empty!");
-  cv::Mat colorMat = OccupancyGridToMat(saved_map_);
+  std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(FLAGS_resolution);
+  cv::Mat colorMat = OccupancyGridToMat(*map);
   std::vector<int> compression_params;
   compression_params.push_back(cv::IMWRITE_PNG_COMPRESSION);
   compression_params.push_back(9);
@@ -317,8 +336,8 @@ void Manager::SaveMap(std::string map_name)
   /*******************save yaml****************/
   FILE *yaml = fopen((map_name_folder_path + "/" + map_name + ".yaml").c_str(), "w");
   fprintf(yaml, "image: %s\nresolution: %f\nwidth: %d\nheight: %d\norigin: [%f, %f, %f]\nnegate: 0\n\n",
-          (map_name + ".png").c_str(), saved_map_.info.resolution, saved_map_.info.width, saved_map_.info.height,
-          saved_map_.info.origin.position.x, saved_map_.info.origin.position.y, tf::getYaw(saved_map_.info.origin.orientation));
+          (map_name + ".png").c_str(), map->info.resolution, map->info.width, map->info.height,
+          map->info.origin.position.x, map->info.origin.position.y, tf::getYaw(map->info.origin.orientation));
   fclose(yaml);
   ROS_INFO("map saved done!");
 }
@@ -333,13 +352,13 @@ cv::Mat Manager::OccupancyGridToMat(const nav_msgs::OccupancyGrid &map)
     {
       cv::Vec3b &rgb = colorMat.at<cv::Vec3b>(y, x);
       unsigned int i = x + (map.info.height - y - 1) * map.info.width;
-      if ((map.data[i] >= 0) && (map.data[i] <= 40))
-        rgb[0] = rgb[1] = rgb[2] = 0xFF;
-      else if ((map.data[i] <= 65) && (map.data[i] > 40))
+      if ((map.data[i] >= 0) && (map.data[i] <= 40))        //free space
+        rgb[0] = rgb[1] = rgb[2] = 0xFF;//white
+      else if ((map.data[i] <= 50) && (map.data[i] > 40))   //
         rgb[0] = rgb[1] = rgb[2] = 0xBE;
-      else if ((map.data[i] <= 100) && (map.data[i] > 65))
-        rgb[0] = rgb[1] = rgb[2] = 0;
-      else
+      else if ((map.data[i] <= 100) && (map.data[i] > 50))  //obstacle
+        rgb[0] = rgb[1] = rgb[2] = 0;//black
+      else                                                  //unknow
         rgb[0] = rgb[1] = rgb[2] = 0xd9;
     }
   }

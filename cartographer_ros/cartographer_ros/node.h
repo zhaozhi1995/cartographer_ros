@@ -64,6 +64,12 @@ class Node {
   Node(const Node&) = delete;
   Node& operator=(const Node&) = delete;
 
+  //add by zz
+  MapBuilderBridge* GetMapBuilderBridge()
+  {
+    return &map_builder_bridge_;
+  }
+
   bool FinishLastTrajectory();
 
   // Finishes all yet active trajectories.

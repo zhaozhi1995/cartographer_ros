@@ -49,7 +49,7 @@ MAP_BUILDER.num_background_threads = 3
 
 TRAJECTORY_BUILDER_2D.use_imu_data = true --是否使用IMU数据进行建图
 TRAJECTORY_BUILDER_2D.min_range = 0.05 -- 激光数据的最小距离,超出该范围的将被删除掉
-TRAJECTORY_BUILDER_2D.max_range = 10.0 -- 激光数据的最大距离
+TRAJECTORY_BUILDER_2D.max_range = 25.0 -- 激光数据的最大距离
 -- TRAJECTORY_BUILDER_2D.min_z = 0.1;
 -- TRAJECTORY_BUILDER_2D.max_z = 1;
 -- TRAJECTORY_BUILDER_2D.submaps.num_range_data =90
