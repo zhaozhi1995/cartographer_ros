@@ -16,23 +16,28 @@
 
 <launch>
   <param name="/use_sim_time" value="true" />
-  <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/eva_no_tf.bag"/>
-  <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/5f.bag"/> -->
-  <!-- <arg name="bag_filename" default="/home/movejbot/bag/5f.bag"/> -->
+  <arg name="bag_filename" default=
+    "/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/OpenLORIS-Scene/rosbag/corridor1-1_2-rosbag/corridor1-2-unite-imu.bag"/>
   
+  <node name="cartographer_node" pkg="cartographer_ros"
+      type="cartographer_node" args="
+          -map_folder_path $(env WORK_PATH)/Map/
+          -configuration_directory $(find cartographer_ros)/configuration_files
+          -configuration_basename OpenLORIS-Scene.lua
+          -configuration_basename_localization OpenLORIS-Scene_loc.lua"
+      output="screen">
+  </node>
+
   <param name="robot_description"
-    textfile="$(find cartographer_ros)/urdf/eva.urdf" />
+    textfile="$(find cartographer_ros)/urdf/OpenLORIS-Scene.urdf" />
 
   <node name="robot_state_publisher" pkg="robot_state_publisher"
     type="robot_state_publisher" />
-
-  <include file="$(find cartographer_ros)/launch/movexbot.launch" />
 
   <node name="rviz" pkg="rviz" type="rviz" required="true"
       args="-d $(find cartographer_ros)/configuration_files/demo_2d.rviz" />
   <node name="playbag" pkg="rosbag" type="play"
       args="--clock -r 1 -s 0 $(arg bag_filename)" >
-      <remap from="/kitti/velo/pointcloud" to="/points2"/>
-      <remap from="/kitti/oxts/imu" to="/imu"/>
+      <remap from="/d400/imu0" to="/imu"/>
   </node>
 </launch>

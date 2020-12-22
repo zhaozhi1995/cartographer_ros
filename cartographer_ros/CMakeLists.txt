@@ -54,7 +54,7 @@ google_enable_testing()
 set(CARTOGRAPHER_GMOCK_LIBRARIES ${GMOCK_LIBRARIES})
 
 find_package(catkin REQUIRED COMPONENTS ${PACKAGE_DEPENDENCIES})
-
+pkg_check_modules(YAMLCPP REQUIRED yaml-cpp>=0.5)
 include(FindPkgConfig)
 
 find_package(absl REQUIRED)
@@ -70,6 +70,7 @@ endif()
 
 include_directories(
   ${urdfdom_headers_INCLUDE_DIRS}
+  ${YAMLCPP_INCLUDE_DIRS}
 )
 
 # Override Catkin's GTest configuration to use GMock.
@@ -132,7 +133,7 @@ target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
 # Boost
 target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
   "${Boost_INCLUDE_DIRS}")
-target_link_libraries(${PROJECT_NAME} PUBLIC ${Boost_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} PUBLIC ${Boost_LIBRARIES} ${YAMLCPP_LIBRARIES})
 
 # Catkin
 target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC ${catkin_INCLUDE_DIRS})

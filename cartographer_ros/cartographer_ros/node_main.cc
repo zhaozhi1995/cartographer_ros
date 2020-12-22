@@ -14,11 +14,7 @@
  * limitations under the License.
  */
 
-#define USE_MANAGER
-
-#ifdef USE_MANAGER
 #include "cartographer_ros/node_manager.hpp"
-#else
 #include "absl/memory/memory.h"
 #include "cartographer/mapping/map_builder.h"
 #include "cartographer_ros/node.h"
@@ -27,28 +23,27 @@
 #include "gflags/gflags.h"
 #include "tf2_ros/transform_listener.h"
 
-DEFINE_bool(collect_metrics, false,
-            "Activates the collection of runtime metrics. If activated, the "
-            "metrics can be accessed via a ROS service.");
-DEFINE_string(configuration_directory, "",
-              "First directory in which configuration files are searched, "
-              "second is always the Cartographer installation to allow "
-              "including files from there.");
-DEFINE_string(configuration_basename, "",
-              "Basename, i.e. not containing any directory prefix, of the "
-              "configuration file.");
-DEFINE_string(load_state_filename, "",
-              "If non-empty, filename of a .pbstream file to load, containing "
-              "a saved SLAM state.");
-DEFINE_bool(load_frozen_state, true,
-            "Load the saved state as frozen (non-optimized) trajectories.");
-DEFINE_bool(
-    start_trajectory_with_default_topics, true,
-    "Enable to immediately start the first trajectory with default topics.");
-DEFINE_string(
-    save_state_filename, "",
-    "If non-empty, serialize state and write it to disk before shutting down.");
-#endif
+// DEFINE_bool(collect_metrics, false,
+//             "Activates the collection of runtime metrics. If activated, the "
+//             "metrics can be accessed via a ROS service.");
+// DEFINE_string(configuration_directory, "",
+//               "First directory in which configuration files are searched, "
+//               "second is always the Cartographer installation to allow "
+//               "including files from there.");
+// DEFINE_string(configuration_basename, "",
+//               "Basename, i.e. not containing any directory prefix, of the "
+//               "configuration file.");
+// DEFINE_string(load_state_filename, "",
+//               "If non-empty, filename of a .pbstream file to load, containing "
+//               "a saved SLAM state.");
+// DEFINE_bool(load_frozen_state, true,
+//               "Load the saved state as frozen (non-optimized) trajectories.");
+// DEFINE_bool(start_trajectory_with_default_topics, true,
+//               "Enable to immediately start the first trajectory with default topics.");
+// DEFINE_string(save_state_filename, "",
+//               "If non-empty, serialize state and write it to disk before shutting down.");
+DEFINE_bool(use_manager, true,
+            "whether or not use manager for cartographer node");
 
 namespace cartographer_ros {
 namespace {
@@ -100,16 +95,19 @@ int main(int argc, char** argv) {
   ::ros::init(argc, argv, "cartographer_node");
   ::ros::start();
 
-#ifdef USE_MANAGER
-  constexpr double kTfBufferCacheTimeInSeconds = 10.;
-  tf2_ros::Buffer tf_buffer{::ros::Duration(kTfBufferCacheTimeInSeconds)};
-  tf2_ros::TransformListener tf(tf_buffer);
-  cartographer_ros::Manager manager(&tf_buffer);
-  ::ros::spin();
-#else
-  cartographer_ros::ScopedRosLogSink ros_log_sink;
-  cartographer_ros::Run();
-#endif
+  if(FLAGS_use_manager)
+  {
+    constexpr double kTfBufferCacheTimeInSeconds = 10.;
+    tf2_ros::Buffer tf_buffer{::ros::Duration(kTfBufferCacheTimeInSeconds)};
+    tf2_ros::TransformListener tf(tf_buffer);
+    cartographer_ros::Manager manager(&tf_buffer);
+    ::ros::spin();
+  }
+  else
+  {
+    cartographer_ros::ScopedRosLogSink ros_log_sink;
+    cartographer_ros::Run();
+  }
 
   ::ros::shutdown();
 }

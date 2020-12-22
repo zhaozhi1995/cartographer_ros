@@ -1,0 +1,41 @@
+<!--
+  Copyright 2016 The Cartographer Authors
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+<robot name="OpenLORIS-Scene">
+  <link name="d400_imu"/>
+  <link name="laser"/>
+  <link name="marker" />
+  <link name="base_link" />
+
+  <joint name="d400_imu" type="fixed">
+    <parent link="base_link" />
+    <child link="d400_imu" />
+    <origin xyz="0.0203127935529 -0.00510325236246 -0.0112013882026" rpy="  0  0.01 0"/>
+  </joint>
+
+  <joint name="marker_jioint" type="fixed">
+    <parent link="base_link" />
+    <child link="marker" />
+    <origin xyz="0.177316242013 -0.0831512952391 0.919981459056" rpy=" 0.04 -0.01 -1.57"/>
+  </joint>
+
+  <joint name="laser" type="fixed">
+    <parent link="base_link" />
+    <child link="laser" />
+    <origin xyz="0.14350911105 -0.0964248846142 0.998048618989" rpy="  0.016   0.037   0.001"/>
+  </joint>
+
+</robot>
