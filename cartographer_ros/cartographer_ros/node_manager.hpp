@@ -111,7 +111,7 @@ public:
     initial_pose_sub_ = nh.subscribe("/initialpose",1, &Manager::HandleInitialPose,this);
     app_initial_pose_sub_ = nh.subscribe("/nav/cmd/initPose", 1, &Manager::HandleAppInitialPose, this);
     slam_state_sub_ = nh.subscribe("/scan/cmd/slam_state", 1, &Manager::HandleSlamState,this);
-    slam_state_pub_ = nh.advertise<skyee_msg::androidConsole>("/scan/cmd/slam_state",1);
+    slam_state_pub_ = nh.advertise<skyee_msg::androidConsole>("/scan/cmd/slam_state",1,true);
     app_slam_state_pub_ = nh.advertise<std_msgs::String>("app_slam_state", 1);//TODO:可以用/scan/cmd/slam_state取代
     map_android_pub_ = nh.advertise<skyee_msg::mapAndroid>("/map_android_picture", 1);
     mapping_map_info_ = nh.advertise<skyee_msg::mapInfo>("/mapping_map_info", 1);
@@ -225,6 +225,7 @@ void Manager::HandleArucoTag(const geometry_msgs::PoseStamped &tag_pose)
           SetInitialPose(new_base_link_pose);
           skyee_msg::androidConsole slam_state_msg;
           slam_state_msg.model.data = "localization_success";
+          slam_state_msg.name.data = map_data_.map_name;
           slam_state_pub_.publish(slam_state_msg);
           std_msgs::String app_slam_state_msg;
           app_slam_state_msg.data = "slam_success";
@@ -261,7 +262,24 @@ void Manager::MapPublish(const ::ros::WallTimerEvent& unused_timer_event)
     map_data_.mapping_resolution += 0.01;
     // ROS_INFO("update resolution:%f",map_data_.mapping_resolution);
   }
+
   cv::Mat mat = OccupancyGridToMat(*map);
+
+  //draw trajectory
+  auto trajectory_node_list = node_->GetMapBuilderBridge()->GetTrajectoryNodeList();
+  for(auto &trajectory_node: trajectory_node_list.markers)
+  {
+    cv::Vec3b color(trajectory_node.color.b*255,trajectory_node.color.g*255,trajectory_node.color.r*255);
+    for(auto &point:trajectory_node.points)
+    {
+      int x_index,y_index;
+      x_index = (point.x - map->info.origin.position.x) / map->info.resolution;
+      y_index = (point.y - map->info.origin.position.y) / map->info.resolution;
+      y_index = map->info.height - y_index - 1;
+      mat.at<cv::Vec3b>(y_index, x_index) = color;
+    }
+  }
+  
   std::vector<uchar> data_encode;
   cv::imencode(".png", mat, data_encode);
   map_data_.app_map.width = mat.cols;

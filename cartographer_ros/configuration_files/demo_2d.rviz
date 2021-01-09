@@ -5,7 +5,6 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Submaps1/Submaps1
-        - /Constraints1
         - /Constraints1/Namespaces1
       Splitter Ratio: 0.600670993
     Tree Height: 359
@@ -56,17 +55,17 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
-        base_link:
+        footprint:
           Value: true
-        gyro_link:
+        hokuyo_link:
           Value: true
-        laser_link_horizontal:
+        imu_link:
+          Value: true
+        lidar_link:
           Value: true
         map:
           Value: true
         odom:
-          Value: true
-        odom_link:
           Value: true
       Marker Scale: 1
       Name: TF
@@ -76,12 +75,13 @@ Visualization Manager:
       Tree:
         map:
           odom:
-            odom_link:
-              base_link:
-                gyro_link:
-                  {}
-                laser_link_horizontal:
-                  {}
+            footprint:
+              hokuyo_link:
+                {}
+              imu_link:
+                {}
+              lidar_link:
+                {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -95,19 +95,19 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
-        base_link:
+        footprint:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        gyro_link:
+        hokuyo_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        laser_link_horizontal:
+        imu_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        odom_link:
+        lidar_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -118,7 +118,7 @@ Visualization Manager:
       Value: true
       Visual Enabled: true
     - Class: Submaps
-      Enabled: false
+      Enabled: true
       Fade-out distance: 1
       High Resolution: true
       Low Resolution: false
@@ -127,10 +127,15 @@ Visualization Manager:
       Submaps:
         All: true
         All Submap Pose Markers: true
+        Trajectory 0:
+          0.112: true
+          1.22: true
+          Submap Pose Markers: true
+          Value: true
       Topic: /submap_list
       Tracking frame: base_link
       Unreliable: false
-      Value: false
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -167,7 +172,6 @@ Visualization Manager:
       Name: Trajectories
       Namespaces:
         Trajectory 0: true
-        Trajectory 1: true
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
@@ -183,12 +187,12 @@ Visualization Manager:
       Marker Topic: /constraint_list
       Name: Constraints
       Namespaces:
-        Inter constraints, different trajectories: false
-        Inter constraints, same trajectory: false
+        Inter constraints, different trajectories: true
+        Inter constraints, same trajectory: true
         Inter residuals, different trajectories: true
-        Inter residuals, same trajectory: false
-        Intra constraints: false
-        Intra residuals: false
+        Inter residuals, same trajectory: true
+        Intra constraints: true
+        Intra residuals: true
       Queue Size: 100
       Value: true
     - Alpha: 0.699999988
@@ -213,12 +217,12 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: Intensity
       Decay Time: 0
-      Enabled: false
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 302
+      Max Intensity: 0
       Min Color: 0; 0; 0
-      Min Intensity: 108
+      Min Intensity: 0
       Name: LaserScan
       Position Transformer: XYZ
       Queue Size: 10
@@ -226,11 +230,41 @@ Visualization Manager:
       Size (Pixels): 3
       Size (m): 0.100000001
       Style: Flat Squares
-      Topic: /nav_scan
+      Topic: /scan
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 0
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.00999999978
+      Style: Flat Squares
+      Topic: /points2
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 100; 100; 100
@@ -255,7 +289,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: -0.0650001168
+      Angle: -1.27499986
       Class: rviz/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
@@ -265,11 +299,11 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Scale: 28.3340034
+      Scale: 27.9942245
       Target Frame: base_link
       Value: TopDownOrtho (rviz)
-      X: -0.913779497
-      Y: 2.21489644
+      X: 2.93996358
+      Y: 5.32257795
     Saved: ~
 Window Geometry:
   Displays:
