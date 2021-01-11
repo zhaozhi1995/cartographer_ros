@@ -270,15 +270,20 @@ void Manager::MapPublish(const ::ros::WallTimerEvent& unused_timer_event)
   for(auto &trajectory_node: trajectory_node_list.markers)
   {
     cv::Vec3b color(trajectory_node.color.b*255,trajectory_node.color.g*255,trajectory_node.color.r*255);
+    cv::Point last_point(0,0);
     for(auto &point:trajectory_node.points)
     {
-      int x_index,y_index;
-      x_index = (point.x - map->info.origin.position.x) / map->info.resolution;
-      y_index = (point.y - map->info.origin.position.y) / map->info.resolution;
-      y_index = map->info.height - y_index - 1;
-      mat.at<cv::Vec3b>(y_index, x_index) = color;
+      cv::Point new_point;
+      new_point.x = (point.x - map->info.origin.position.x) / map->info.resolution;
+      new_point.y = (point.y - map->info.origin.position.y) / map->info.resolution;
+      new_point.y = map->info.height - new_point.y - 1;
+      if(last_point != cv::Point(0,0))
+        cv::line(mat,last_point,new_point,color);
+      last_point = new_point;
     }
   }
+  // cv::imshow("a",mat);
+  // cv::waitKey(1);
   
   std::vector<uchar> data_encode;
   cv::imencode(".png", mat, data_encode);
