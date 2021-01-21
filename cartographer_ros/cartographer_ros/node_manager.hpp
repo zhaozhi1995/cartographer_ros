@@ -111,7 +111,7 @@ public:
     initial_pose_sub_ = nh.subscribe("/initialpose",1, &Manager::HandleInitialPose,this);
     app_initial_pose_sub_ = nh.subscribe("/nav/cmd/initPose", 1, &Manager::HandleAppInitialPose, this);
     slam_state_sub_ = nh.subscribe("/scan/cmd/slam_state", 1, &Manager::HandleSlamState,this);
-    slam_state_pub_ = nh.advertise<skyee_msg::androidConsole>("/scan/cmd/slam_state",1,true);
+    slam_state_pub_ = nh.advertise<skyee_msg::androidConsole>("/scan/cmd/slam_state",1);
     app_slam_state_pub_ = nh.advertise<std_msgs::String>("app_slam_state", 1);//TODO:可以用/scan/cmd/slam_state取代
     map_android_pub_ = nh.advertise<skyee_msg::mapAndroid>("/map_android_picture", 1);
     mapping_map_info_ = nh.advertise<skyee_msg::mapInfo>("/mapping_map_info", 1);
@@ -172,10 +172,12 @@ void Manager::HandleSlamState(const skyee_msg::androidConsole &msg)
   }
   else if(msg.model.data == "localization_success")
   {
+    ROS_INFO("localization_success");
     slam_state_ = SlamState::SLAM_STATE_LOCATE_SUCCEED;
   }
   else if(msg.model.data == "cancel_localization_success_flag")
   {
+    ROS_INFO("cancel_localization_success_flag");
     slam_state_ = SlamState::SLAM_STATE_LOCATING;
   }
 }
