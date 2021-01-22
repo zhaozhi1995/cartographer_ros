@@ -200,6 +200,15 @@ void Manager::HandleArucoTag(const geometry_msgs::PoseStamped &tag_pose)
 {
   if(slam_state_ == SlamState::SLAM_STATE_LOCATING)
   {
+    if(map_data_.map_name != "1floor")
+    {
+      skyee_msg::androidConsole slam_state_msg;
+      slam_state_msg.model.data = "localization_start";
+      slam_state_msg.name.data = "1floor";
+      slam_state_pub_.publish(slam_state_msg);
+      ros::Duration(2.0).sleep();
+      return;
+    }
     std::ifstream fin(FLAGS_map_folder_path + map_data_.map_name + "/ChargerStation/station.yaml");
     if (fin.is_open())
     {
@@ -229,9 +238,9 @@ void Manager::HandleArucoTag(const geometry_msgs::PoseStamped &tag_pose)
           slam_state_msg.model.data = "localization_success";
           slam_state_msg.name.data = map_data_.map_name;
           slam_state_pub_.publish(slam_state_msg);
-          std_msgs::String app_slam_state_msg;
-          app_slam_state_msg.data = "slam_success";
-          app_slam_state_pub_.publish(app_slam_state_msg);
+          // std_msgs::String app_slam_state_msg;
+          // app_slam_state_msg.data = "slam_success";
+          // app_slam_state_pub_.publish(app_slam_state_msg);
           //pub slam state to succeed
           ROS_INFO("have found tag station,location success.");
         }
