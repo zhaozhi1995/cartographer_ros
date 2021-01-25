@@ -82,7 +82,7 @@ private:
   TrajectoryOptions trajectory_options,trajectory_options_localization;
   tf2_ros::Buffer* tf_buffer_;
   ros::Subscriber initial_pose_sub_,app_initial_pose_sub_,robot_pose_sub_,slam_state_sub_,aruco_tag_sub_;
-  ros::Publisher map_android_pub_,mapping_map_info_,robot_grid_pos_pub_,map_pub_,start_pub_,close_pub_,slam_state_pub_,app_slam_state_pub_;
+  ros::Publisher map_android_pub_,mapping_map_info_,robot_grid_pos_pub_,map_pub_,start_pub_,close_pub_,slam_state_pub_;
   ros::NodeHandle nh;
   ros::WallTimer map_publisher_timer_;
   MapData_t map_data_;
@@ -112,7 +112,6 @@ public:
     app_initial_pose_sub_ = nh.subscribe("/nav/cmd/initPose", 1, &Manager::HandleAppInitialPose, this);
     slam_state_sub_ = nh.subscribe("/scan/cmd/slam_state", 1, &Manager::HandleSlamState,this);
     slam_state_pub_ = nh.advertise<skyee_msg::androidConsole>("/scan/cmd/slam_state",1);
-    app_slam_state_pub_ = nh.advertise<std_msgs::String>("app_slam_state", 1);//TODO:可以用/scan/cmd/slam_state取代
     map_android_pub_ = nh.advertise<skyee_msg::mapAndroid>("/map_android_picture", 1);
     mapping_map_info_ = nh.advertise<skyee_msg::mapInfo>("/mapping_map_info", 1);
     robot_grid_pos_pub_ = nh.advertise<skyee_msg::robotPos>("robot_pos", 1);
@@ -229,10 +228,6 @@ void Manager::HandleArucoTag(const geometry_msgs::PoseStamped &tag_pose)
           slam_state_msg.model.data = "localization_success";
           slam_state_msg.name.data = map_data_.map_name;
           slam_state_pub_.publish(slam_state_msg);
-          std_msgs::String app_slam_state_msg;
-          app_slam_state_msg.data = "slam_success";
-          app_slam_state_pub_.publish(app_slam_state_msg);
-          //pub slam state to succeed
           ROS_INFO("have found tag station,location success.");
         }
       }
