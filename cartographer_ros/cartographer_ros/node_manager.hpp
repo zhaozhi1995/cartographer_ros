@@ -25,6 +25,7 @@
 #include "ros/wall_timer.h"
 #include <syscall.h>
 #include <yaml-cpp/yaml.h>
+#include <thread>
 
 DEFINE_bool(collect_metrics, false,
             "Activates the collection of runtime metrics. If activated, the "
@@ -84,7 +85,6 @@ private:
   ros::Subscriber initial_pose_sub_,app_initial_pose_sub_,robot_pose_sub_,slam_state_sub_,aruco_tag_sub_;
   ros::Publisher map_android_pub_,mapping_map_info_,robot_grid_pos_pub_,map_pub_,start_pub_,close_pub_,slam_state_pub_;
   ros::NodeHandle nh;
-  ros::WallTimer map_publisher_timer_;
   MapData_t map_data_;
   tf::TransformListener listener_;
 
@@ -101,7 +101,8 @@ private:
   void HandleSlamState(const skyee_msg::androidConsole &msg);
   void HandleRobotPose(const geometry_msgs::PoseStamped &pose);
   void HandleArucoTag(const geometry_msgs::PoseStamped &tag_pose);
-  void MapPublish(const ::ros::WallTimerEvent& unused_timer_event);
+  void MapPublish(void);
+  static void MapPublishThread(Manager *manager);
 public:
   Manager(tf2_ros::Buffer* tf_buffer)
   {
@@ -118,8 +119,8 @@ public:
     close_pub_ = nh.advertise<std_msgs::Bool>("cartographer_complete", 1, true);
     start_pub_ = nh.advertise<std_msgs::Bool>("cartographer_start", 1, true);
     map_pub_ = nh.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
-    map_publisher_timer_ = nh.createWallTimer(ros::WallDuration(1),&Manager::MapPublish, this);
-    map_publisher_timer_.stop();
+    std::thread map_publish_thread(MapPublishThread,this);
+    map_publish_thread.detach();
   };
   ~Manager(){}
 };
@@ -238,13 +239,20 @@ void Manager::HandleArucoTag(const geometry_msgs::PoseStamped &tag_pose)
   aruco_tag_sub_.shutdown();
 }
 
-void Manager::MapPublish(const ::ros::WallTimerEvent& unused_timer_event)
+void Manager::MapPublishThread(Manager *manager)
 {
-  if(slam_state_ != SlamState::SLAM_STATE_MAPPING)
+  ros::Rate loop(1);
+  while(ros::ok())
   {
-    map_publisher_timer_.stop();
-    return;
+    if(slam_state_ == SlamState::SLAM_STATE_MAPPING)
+      manager->MapPublish();
+    loop.sleep();
   }
+}
+
+void Manager::MapPublish(void)
+{
+  ros::Time start = ros::Time::now();
   std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(map_data_.mapping_resolution);
   if(map->data.empty())
   {
@@ -299,8 +307,12 @@ void Manager::MapPublish(const ::ros::WallTimerEvent& unused_timer_event)
   map_info.originX = map_data_.app_map.originX;
   map_info.originY = map_data_.app_map.originY;
   mapping_map_info_.publish(map_info);
-
+  ROS_INFO("time cost:%f",(ros::Time::now() - start).toSec());
+  
+  start = ros::Time::now();
+  map = GetOccupancyGridMap(FLAGS_resolution);
   map_pub_.publish(*map);
+  ROS_ERROR("time cost2:%f",(ros::Time::now() - start).toSec());
 }
 
 std::unique_ptr<nav_msgs::OccupancyGrid> Manager::GetOccupancyGridMap(float resolution)
@@ -316,7 +328,6 @@ void Manager::StartMapping(std::string map_name,uint32_t app_map_size_max)
   if(node_)
     node_.reset();
   map_data_.app_map_size_max = app_map_size_max * 10; //png compress will decrease data size tenfold
-  slam_state_ = SlamState::SLAM_STATE_MAPPING;
   auto map_builder = cartographer::mapping::CreateMapBuilder(node_options.map_builder_options);
   node_ = boost::shared_ptr<Node>(new Node(node_options, std::move(map_builder), tf_buffer_,FLAGS_collect_metrics));
   if(!map_name.empty() && boost::filesystem::exists(FLAGS_map_folder_path + map_name + "/" + map_name + ".pbstream")) //extend map
@@ -328,8 +339,8 @@ void Manager::StartMapping(std::string map_name,uint32_t app_map_size_max)
   else
     map_data_.mapping_resolution = FLAGS_resolution;
   node_->StartTrajectoryWithDefaultTopics(trajectory_options);
-  map_publisher_timer_.start();
   robot_pose_sub_ = nh.subscribe("/tracked_pose",1, &Manager::HandleRobotPose,this);
+  slam_state_ = SlamState::SLAM_STATE_MAPPING;
 }
 
 void Manager::CloseMapping(std::string map_name)
@@ -337,8 +348,8 @@ void Manager::CloseMapping(std::string map_name)
   ROS_INFO("close mapping!map name:%s",map_name.c_str());
   if(!node_)
     return;
+  slam_state_ = SlamState::SLAM_STATE_STANDBY;
   robot_pose_sub_.shutdown();
-  map_publisher_timer_.stop();
   node_->FinishAllTrajectories();
 
   if (!map_name.empty() && !FLAGS_map_folder_path.empty()) 
@@ -347,7 +358,6 @@ void Manager::CloseMapping(std::string map_name)
     SaveMap(map_name);
   }
   node_.reset();
-  slam_state_ = SlamState::SLAM_STATE_STANDBY;
 }
 
 void Manager::StartLocalization(std::string map_name)
