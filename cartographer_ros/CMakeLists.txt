@@ -34,6 +34,8 @@ set(PACKAGE_DEPENDENCIES
   urdf
   visualization_msgs
   skyee_msg
+  aruco_msgs
+  navigation
 )
 
 if(WIN32)

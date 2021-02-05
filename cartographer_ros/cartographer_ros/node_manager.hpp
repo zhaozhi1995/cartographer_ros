@@ -26,6 +26,8 @@
 #include <syscall.h>
 #include <yaml-cpp/yaml.h>
 #include <thread>
+#include <aruco_msgs/MarkerArray.h>
+#include <StationID.hpp>
 
 DEFINE_bool(collect_metrics, false,
             "Activates the collection of runtime metrics. If activated, the "
@@ -76,17 +78,17 @@ class Manager
     float mapping_resolution;
   };
   
-
 private:
   boost::shared_ptr<Node> node_;
   NodeOptions node_options;
   TrajectoryOptions trajectory_options,trajectory_options_localization;
   tf2_ros::Buffer* tf_buffer_;
-  ros::Subscriber initial_pose_sub_,app_initial_pose_sub_,robot_pose_sub_,slam_state_sub_,aruco_tag_sub_;
+  ros::Subscriber initial_pose_sub_,app_initial_pose_sub_,robot_pose_sub_,slam_state_sub_,aruco_tag_sub_,dock_station_sub_;
   ros::Publisher map_android_pub_,mapping_map_info_,robot_grid_pos_pub_,map_pub_,start_pub_,close_pub_,slam_state_pub_;
   ros::NodeHandle nh;
   MapData_t map_data_;
   tf::TransformListener listener_;
+  StationID dock_station_;
 
   void StartMapping(std::string map_name,uint32_t app_map_size_max);
   void CloseMapping(std::string map_name);
@@ -100,12 +102,14 @@ private:
   void HandleAppInitialPose(const skyee_msg::destination_point &pose_msg);
   void HandleSlamState(const skyee_msg::androidConsole &msg);
   void HandleRobotPose(const geometry_msgs::PoseStamped &pose);
-  void HandleArucoTag(const geometry_msgs::PoseStamped &tag_pose);
+  void HandleStationTag(const geometry_msgs::PoseStamped &tag_pose);//TODO:to delete
+  void HandleDockStation(const aruco_msgs::MarkerArray &markers);
   void MapPublish(void);
   static void MapPublishThread(Manager *manager);
 public:
   Manager(tf2_ros::Buffer* tf_buffer)
   {
+    dock_station_.SetMapFolderPath(FLAGS_map_folder_path);
     tf_buffer_ = tf_buffer;
     std::tie(node_options, trajectory_options) = LoadOptions(FLAGS_configuration_directory, FLAGS_configuration_basename);
     std::tie(node_options, trajectory_options_localization) = LoadOptions(FLAGS_configuration_directory, FLAGS_configuration_basename_localization);
@@ -196,7 +200,54 @@ void Manager::HandleRobotPose(const geometry_msgs::PoseStamped &pose) //only for
   robot_grid_pos_pub_.publish(robot_grid_pose);
 }
 
-void Manager::HandleArucoTag(const geometry_msgs::PoseStamped &tag_pose)
+void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers)
+{
+  if(slam_state_ == SlamState::SLAM_STATE_LOCATING)
+  {
+    auto station = dock_station_.GetStation(markers.markers.front().id);
+    if(station.first)
+    {
+      ROS_ERROR("map name:%s,station map name:%s",map_data_.map_name.c_str(),station.second.map_name.c_str());
+      if(map_data_.map_name != station.second.map_name)
+      {
+        skyee_msg::androidConsole slam_state_msg;
+        slam_state_msg.model.data = "localization_start";
+        slam_state_msg.name.data = station.second.map_name;
+        slam_state_pub_.publish(slam_state_msg);
+        ros::Duration(2.0).sleep();
+        return;
+      }
+      else
+      {
+        if(listener_.waitForTransform("/base_link", markers.header.frame_id, markers.header.stamp, ros::Duration(1.0)))
+        {
+          geometry_msgs::PoseStamped tag_pose;
+          tag_pose.header = markers.header;
+          tag_pose.pose = markers.markers.front().pose.pose;
+          listener_.transformPose("/base_link",tag_pose,tag_pose);
+          tag_pose.pose.position.z = 0;
+          tag_pose.pose.orientation = tf::createQuaternionMsgFromYaw(tf::getYaw(tag_pose.pose.orientation));
+          tf::Transform tag_to_base_link,tag_to_map;
+          tf::poseMsgToTF(tag_pose.pose,tag_to_base_link);
+          tf::poseMsgToTF(station.second.pose,tag_to_map);
+          tf::Transform new_base_link_to_map = tag_to_map * tag_to_base_link.inverse();
+          geometry_msgs::Pose new_base_link_pose;
+          tf::poseTFToMsg(new_base_link_to_map,new_base_link_pose);
+          SetInitialPose(new_base_link_pose);
+
+          skyee_msg::androidConsole slam_state_msg;
+          slam_state_msg.model.data = "localization_success";
+          slam_state_msg.name.data = map_data_.map_name;
+          slam_state_pub_.publish(slam_state_msg);
+          ROS_INFO("have found tag station,location success.");
+        }
+      }
+    }
+  }
+  dock_station_sub_.shutdown();
+}
+
+void Manager::HandleStationTag(const geometry_msgs::PoseStamped &tag_pose)
 {
   if(slam_state_ == SlamState::SLAM_STATE_LOCATING)
   {
@@ -386,7 +437,8 @@ void Manager::StartLocalization(std::string map_name)
   if (FLAGS_start_trajectory_with_default_topics) {
     node_->StartTrajectoryWithDefaultTopics(trajectory_options_localization);
   }
-  aruco_tag_sub_ = nh.subscribe("/aruco_single/pose",1,&Manager::HandleArucoTag,this);
+  aruco_tag_sub_ = nh.subscribe("/aruco_single/pose",1,&Manager::HandleStationTag,this);
+  dock_station_sub_ = nh.subscribe("/aruco_marker_publisher/markers",1,&Manager::HandleDockStation,this);
 }
 
 void Manager::CloseLocalization(void)

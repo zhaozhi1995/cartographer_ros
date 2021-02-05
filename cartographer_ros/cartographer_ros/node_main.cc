@@ -95,6 +95,7 @@ int main(int argc, char** argv) {
   ::ros::init(argc, argv, "cartographer_node");
   ::ros::start();
 
+  // cartographer_ros::ScopedRosLogSink ros_log_sink;
   if(FLAGS_use_manager)
   {
     constexpr double kTfBufferCacheTimeInSeconds = 10.;
@@ -104,10 +105,7 @@ int main(int argc, char** argv) {
     ::ros::spin();
   }
   else
-  {
-    cartographer_ros::ScopedRosLogSink ros_log_sink;
     cartographer_ros::Run();
-  }
 
   ::ros::shutdown();
 }

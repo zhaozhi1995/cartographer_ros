@@ -5,9 +5,10 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Submaps1/Submaps1
+        - /Constraints1
         - /Constraints1/Namespaces1
       Splitter Ratio: 0.600670993
-    Tree Height: 359
+    Tree Height: 747
   - Class: rviz/Selection
     Name: Selection
   - Class: rviz/Tool Properties
@@ -55,17 +56,9 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
-        footprint:
-          Value: true
-        hokuyo_link:
-          Value: true
-        imu_link:
-          Value: true
-        lidar_link:
+        base_link:
           Value: true
         map:
-          Value: true
-        odom:
           Value: true
       Marker Scale: 1
       Name: TF
@@ -74,14 +67,8 @@ Visualization Manager:
       Show Names: true
       Tree:
         map:
-          odom:
-            footprint:
-              hokuyo_link:
-                {}
-              imu_link:
-                {}
-              lidar_link:
-                {}
+          base_link:
+            {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -95,19 +82,7 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
-        footprint:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        hokuyo_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        imu_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        lidar_link:
+        base_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -118,7 +93,7 @@ Visualization Manager:
       Value: true
       Visual Enabled: true
     - Class: Submaps
-      Enabled: true
+      Enabled: false
       Fade-out distance: 1
       High Resolution: true
       Low Resolution: false
@@ -127,15 +102,10 @@ Visualization Manager:
       Submaps:
         All: true
         All Submap Pose Markers: true
-        Trajectory 0:
-          0.112: true
-          1.22: true
-          Submap Pose Markers: true
-          Value: true
       Topic: /submap_list
       Tracking frame: base_link
       Unreliable: false
-      Value: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -191,7 +161,7 @@ Visualization Manager:
         Inter constraints, same trajectory: true
         Inter residuals, different trajectories: true
         Inter residuals, same trajectory: true
-        Intra constraints: true
+        Intra constraints: false
         Intra residuals: true
       Queue Size: 100
       Value: true
@@ -289,7 +259,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: -1.27499986
+      Angle: 0.169999883
       Class: rviz/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
@@ -299,11 +269,11 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Scale: 27.9942245
+      Scale: 6.7086587
       Target Frame: base_link
       Value: TopDownOrtho (rviz)
-      X: 2.93996358
-      Y: 5.32257795
+      X: 24.5414028
+      Y: -31.6902142
     Saved: ~
 Window Geometry:
   Displays:
