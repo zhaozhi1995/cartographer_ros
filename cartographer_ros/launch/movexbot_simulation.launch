@@ -16,12 +16,12 @@
 
 <launch>
   <param name="/use_sim_time" value="true" />
-  <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/eva_no_tf.bag"/>
+  <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/test.bag"/>
   <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/5f.bag"/> -->
   <!-- <arg name="bag_filename" default="/home/movejbot/bag/5f.bag"/> -->
   
   <param name="robot_description"
-    textfile="$(find cartographer_ros)/urdf/eva.urdf" />
+    textfile="$(find cartographer_ros)/urdf/movexbot.urdf" />
 
   <node name="robot_state_publisher" pkg="robot_state_publisher"
     type="robot_state_publisher" />

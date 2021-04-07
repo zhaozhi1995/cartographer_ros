@@ -2,14 +2,16 @@
 <!-- start the cartographer node -->
 
  <node name="cartographer_node" pkg="cartographer_ros" type="cartographer_node" respawn="true" output="screen"
-       args="
+       args="-map_folder_path $(env WORK_PATH)/Map/
           -configuration_basename br.lua
+          -configuration_basename_localization localization.lua
+          -use_manager=false
 	  -configuration_directory $(find cartographer_ros)/configuration_files">
-  
   <!-- <remap from="points2" to="/rslidar_points"/> -->
   <!-- <remap from="points2" to="/rslidar_points_single"/> -->
-  <remap from="scan_1" to="/front_scan"/>
-  <remap from="scan_2" to="/rear_scan"/>
+  <remap from="scan" to="/front_scan"/>
+  <!-- <remap from="scan_1" to="/front_scan"/> -->
+  <!-- <remap from="scan_2" to="/rear_scan"/> -->
  </node>
 
 </launch>

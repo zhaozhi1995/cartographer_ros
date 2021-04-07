@@ -207,7 +207,7 @@ void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers)
     auto station = dock_station_.GetStation(markers.markers.front().id);
     if(station.first)
     {
-      ROS_ERROR("map name:%s,station map name:%s",map_data_.map_name.c_str(),station.second.map_name.c_str());
+      ROS_ERROR("current map name:%s,station map name:%s",map_data_.map_name.c_str(),station.second.map_name.c_str());
       if(map_data_.map_name != station.second.map_name)
       {
         skyee_msg::androidConsole slam_state_msg;
@@ -247,7 +247,7 @@ void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers)
   dock_station_sub_.shutdown();
 }
 
-void Manager::HandleStationTag(const geometry_msgs::PoseStamped &tag_pose)
+void Manager::HandleStationTag(const geometry_msgs::PoseStamped &tag_pose) //TODO:to delete
 {
   if(slam_state_ == SlamState::SLAM_STATE_LOCATING)
   {

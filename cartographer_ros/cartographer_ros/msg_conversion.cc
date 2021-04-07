@@ -141,6 +141,22 @@ LaserScanToPointCloudWithIntensities(const LaserMessageType& msg) {
   }
   PointCloudWithIntensities point_cloud;
   float angle = msg.angle_min;
+
+  /************Adjust timestamp for point frequency *********/
+  double time_increment_vary = msg.time_increment;
+#if 0
+  static double timestamp_current = 0 ;
+  static double timestamp_last = 0 ;
+  
+  timestamp_last = timestamp_current;
+  timestamp_current = msg.header.stamp.toSec();
+  if(timestamp_last != 0) {
+    time_increment_vary = (timestamp_current - timestamp_last) / msg.ranges.size();
+  }
+  else time_increment_vary = msg.time_increment;
+#endif
+  /************ end *********/
+  
   for (size_t i = 0; i < msg.ranges.size(); ++i) {
     const auto& echoes = msg.ranges[i];
     if (HasEcho(echoes)) {
@@ -149,7 +165,7 @@ LaserScanToPointCloudWithIntensities(const LaserMessageType& msg) {
         const Eigen::AngleAxisf rotation(angle, Eigen::Vector3f::UnitZ());
         const cartographer::sensor::TimedRangefinderPoint point{
             rotation * (first_echo * Eigen::Vector3f::UnitX()),
-            i * msg.time_increment};
+            i * time_increment_vary/* msg.time_increment */};
         point_cloud.points.push_back(point);
         if (msg.intensities.size() > 0) {
           CHECK_EQ(msg.intensities.size(), msg.ranges.size());
@@ -163,6 +179,21 @@ LaserScanToPointCloudWithIntensities(const LaserMessageType& msg) {
     }
     angle += msg.angle_increment;
   }
+
+  /********************** Adjust timestamp for point reverse ********************/
+#if 1
+  std::vector<Eigen::Vector3f>points_temp;
+  for (auto& point :point_cloud.points) {
+    points_temp.push_back(point.position);
+  }
+  int index = 0;
+  for (auto& point :point_cloud.points) {
+    point.position =  points_temp[point_cloud.points.size()-1-index];
+    index++;
+  }
+#endif
+  /********************** end *********************/
+
   ::cartographer::common::Time timestamp = FromRos(msg.header.stamp);
   if (!point_cloud.points.empty()) {
     const double duration = point_cloud.points.back().time;
