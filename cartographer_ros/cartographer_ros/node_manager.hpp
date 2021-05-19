@@ -27,7 +27,7 @@
 #include <yaml-cpp/yaml.h>
 #include <thread>
 #include <aruco_msgs/MarkerArray.h>
-#include <StationID.hpp>
+#include <cartographer_ros/StationID.hpp>
 
 DEFINE_bool(collect_metrics, false,
             "Activates the collection of runtime metrics. If activated, the "

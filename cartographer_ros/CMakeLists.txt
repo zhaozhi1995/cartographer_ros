@@ -35,7 +35,6 @@ set(PACKAGE_DEPENDENCIES
   visualization_msgs
   skyee_msg
   aruco_msgs
-  navigation
 )
 
 if(WIN32)
@@ -73,6 +72,7 @@ endif()
 include_directories(
   ${urdfdom_headers_INCLUDE_DIRS}
   ${YAMLCPP_INCLUDE_DIRS}
+  ${catkin_INCLUDE_DIRS}
 )
 
 # Override Catkin's GTest configuration to use GMock.
