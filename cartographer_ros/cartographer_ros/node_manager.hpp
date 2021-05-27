@@ -28,6 +28,7 @@
 #include <thread>
 #include <aruco_msgs/MarkerArray.h>
 #include <cartographer_ros/StationID.hpp>
+#include <skyee_msg/Relocalization.h>
 
 DEFINE_bool(collect_metrics, false,
             "Activates the collection of runtime metrics. If activated, the "
@@ -85,6 +86,7 @@ private:
   tf2_ros::Buffer* tf_buffer_;
   ros::Subscriber initial_pose_sub_,app_initial_pose_sub_,robot_pose_sub_,slam_state_sub_,aruco_tag_sub_,dock_station_sub_;
   ros::Publisher map_android_pub_,mapping_map_info_,robot_grid_pos_pub_,map_pub_,start_pub_,close_pub_,slam_state_pub_;
+  ros::ServiceServer relocalization_service_;
   ros::NodeHandle nh;
   MapData_t map_data_;
   tf::TransformListener listener_;
@@ -105,6 +107,7 @@ private:
   void HandleStationTag(const geometry_msgs::PoseStamped &tag_pose);//TODO:to delete
   void HandleDockStation(const aruco_msgs::MarkerArray &markers);
   void MapPublish(void);
+  bool RelocalizationService(skyee_msg::Relocalization::Request &req,skyee_msg::Relocalization::Response &res);
   static void MapPublishThread(Manager *manager);
 public:
   Manager(tf2_ros::Buffer* tf_buffer)
@@ -123,11 +126,29 @@ public:
     close_pub_ = nh.advertise<std_msgs::Bool>("cartographer_complete", 1, true);
     start_pub_ = nh.advertise<std_msgs::Bool>("cartographer_start", 1, true);
     map_pub_ = nh.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
+    relocalization_service_ = nh.advertiseService("slam/relocalization_service",&Manager::RelocalizationService,this);
     std::thread map_publish_thread(MapPublishThread,this);
     map_publish_thread.detach();
   };
   ~Manager(){}
 };
+
+bool Manager::RelocalizationService(skyee_msg::Relocalization::Request &req,skyee_msg::Relocalization::Response &res)
+{
+  geometry_msgs::Pose initial_pose;
+  initial_pose.position.x = req.robot_pose.x * map_data_.mapping_resolution;
+  initial_pose.position.y = req.robot_pose.y * map_data_.mapping_resolution;;
+  initial_pose.orientation = tf::createQuaternionMsgFromYaw(req.robot_pose.theta);
+  SetInitialPose(initial_pose);
+
+  //TODO:增加对定位状态的判断，是否产生约束，如产生正确约束并跳转位置，就直接返回成功，如超过3s未产生正确约束并跳转位置就返回失败
+  ros::Duration(3).sleep();
+  skyee_msg::androidConsole slam_state_msg;
+  slam_state_msg.model.data = "localization_success";
+  slam_state_pub_.publish(slam_state_msg);
+  res.state = true;
+  return true;
+}
 
 void Manager::HandleInitialPose(const geometry_msgs::PoseWithCovarianceStamped &pose_msg)
 {
@@ -137,14 +158,11 @@ void Manager::HandleInitialPose(const geometry_msgs::PoseWithCovarianceStamped &
 //TODO:当前坐标点为图像像素坐标，需修改为map坐标系
 void Manager::HandleAppInitialPose(const skyee_msg::destination_point &pose_msg)
 {
-  if(slam_state_ == SlamState::SLAM_STATE_LOCATING)
-  {
-    geometry_msgs::Pose initial_pose;
-    initial_pose.position.x = pose_msg.gridPosition.x * map_data_.map_info.resolution + map_data_.map_info.origin.position.x;
-    initial_pose.position.y = pose_msg.gridPosition.y * map_data_.map_info.resolution + map_data_.map_info.origin.position.y;
-    initial_pose.orientation = tf::createQuaternionMsgFromYaw(pose_msg.angle);
-    SetInitialPose(initial_pose);
-  }
+  geometry_msgs::Pose initial_pose;
+  initial_pose.position.x = pose_msg.gridPosition.x * map_data_.map_info.resolution + map_data_.map_info.origin.position.x;
+  initial_pose.position.y = pose_msg.gridPosition.y * map_data_.map_info.resolution + map_data_.map_info.origin.position.y;
+  initial_pose.orientation = tf::createQuaternionMsgFromYaw(pose_msg.angle);
+  SetInitialPose(initial_pose);
 }
 
 void Manager::HandleSlamState(const skyee_msg::androidConsole &msg)
@@ -455,6 +473,7 @@ void Manager::SetInitialPose(const geometry_msgs::Pose &initial_pose)
 {
   if(!node_)
     return;
+  slam_state_ = SlamState::SLAM_STATE_LOCATING;
   node_->FinishLastTrajectory(); //TODO: delete the last trajectory to avoid memory increase
   TrajectoryOptions initial_pose_trajectory_options_localization = trajectory_options_localization;
 

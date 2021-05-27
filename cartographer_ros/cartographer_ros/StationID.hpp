@@ -124,7 +124,7 @@ public:
 
     auto check_station = GetStation(station.id);
     if(check_station.first)
-      int flag = remove((map_folder_path_ + check_station.second.map_name + STATION_FOLDER_NAME + STATION_NAME(check_station.second.id)).c_str());
+      remove((map_folder_path_ + check_station.second.map_name + STATION_FOLDER_NAME + STATION_NAME(check_station.second.id)).c_str());
 
     std::string station_path = map_folder_path_ + station.map_name + STATION_FOLDER_NAME;
     if(access(station_path.c_str(),F_OK) != 0)
