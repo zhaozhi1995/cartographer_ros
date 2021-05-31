@@ -16,11 +16,11 @@
 #include "tf/transform_listener.h"
 #include "boost/filesystem.hpp"
 #include "geometry_msgs/PoseWithCovarianceStamped.h"
-#include "skyee_msg/androidConsole.h"
-#include "skyee_msg/mapAndroid.h"
-#include "skyee_msg/mapInfo.h"
-#include "skyee_msg/robotPos.h"
-#include "skyee_msg/destination_point.h"
+#include "movexbot_msgs/androidConsole.h"
+#include "movexbot_msgs/mapAndroid.h"
+#include "movexbot_msgs/mapInfo.h"
+#include "movexbot_msgs/robotPos.h"
+#include "movexbot_msgs/destination_point.h"
 #include "std_msgs/Bool.h"
 #include "ros/wall_timer.h"
 #include <syscall.h>
@@ -28,7 +28,7 @@
 #include <thread>
 #include <aruco_msgs/MarkerArray.h>
 #include <cartographer_ros/StationID.hpp>
-#include <skyee_msg/Relocalization.h>
+#include <movexbot_msgs/Relocalization.h>
 
 DEFINE_bool(collect_metrics, false,
             "Activates the collection of runtime metrics. If activated, the "
@@ -75,7 +75,7 @@ class Manager
     nav_msgs::MapMetaData map_info;//TODO:可以删除，需要先统一坐标系为相对于"map"的栅格坐标
     //for mapping
     uint32_t app_map_size_max;
-    skyee_msg::mapAndroid app_map;
+    movexbot_msgs::mapAndroid app_map;
     float mapping_resolution;
   };
   
@@ -101,13 +101,13 @@ private:
   cv::Mat OccupancyGridToMat(const nav_msgs::OccupancyGrid &map);
   std::unique_ptr<nav_msgs::OccupancyGrid> GetOccupancyGridMap(float resolution);
   void HandleInitialPose(const geometry_msgs::PoseWithCovarianceStamped &pose_msg);
-  void HandleAppInitialPose(const skyee_msg::destination_point &pose_msg);
-  void HandleSlamState(const skyee_msg::androidConsole &msg);
+  void HandleAppInitialPose(const movexbot_msgs::destination_point &pose_msg);
+  void HandleSlamState(const movexbot_msgs::androidConsole &msg);
   void HandleRobotPose(const geometry_msgs::PoseStamped &pose);
   void HandleStationTag(const geometry_msgs::PoseStamped &tag_pose);//TODO:to delete
   void HandleDockStation(const aruco_msgs::MarkerArray &markers);
   void MapPublish(void);
-  bool RelocalizationService(skyee_msg::Relocalization::Request &req,skyee_msg::Relocalization::Response &res);
+  bool RelocalizationService(movexbot_msgs::Relocalization::Request &req,movexbot_msgs::Relocalization::Response &res);
   static void MapPublishThread(Manager *manager);
 public:
   Manager(tf2_ros::Buffer* tf_buffer)
@@ -119,10 +119,10 @@ public:
     initial_pose_sub_ = nh.subscribe("/initialpose",1, &Manager::HandleInitialPose,this);
     app_initial_pose_sub_ = nh.subscribe("/nav/cmd/initPose", 1, &Manager::HandleAppInitialPose, this);
     slam_state_sub_ = nh.subscribe("/scan/cmd/slam_state", 1, &Manager::HandleSlamState,this);
-    slam_state_pub_ = nh.advertise<skyee_msg::androidConsole>("/scan/cmd/slam_state",1);
-    map_android_pub_ = nh.advertise<skyee_msg::mapAndroid>("/map_android_picture", 1);
-    mapping_map_info_ = nh.advertise<skyee_msg::mapInfo>("/mapping_map_info", 1);
-    robot_grid_pos_pub_ = nh.advertise<skyee_msg::robotPos>("robot_pos", 1);
+    slam_state_pub_ = nh.advertise<movexbot_msgs::androidConsole>("/scan/cmd/slam_state",1);
+    map_android_pub_ = nh.advertise<movexbot_msgs::mapAndroid>("/map_android_picture", 1);
+    mapping_map_info_ = nh.advertise<movexbot_msgs::mapInfo>("/mapping_map_info", 1);
+    robot_grid_pos_pub_ = nh.advertise<movexbot_msgs::robotPos>("robot_pos", 1);
     close_pub_ = nh.advertise<std_msgs::Bool>("cartographer_complete", 1, true);
     start_pub_ = nh.advertise<std_msgs::Bool>("cartographer_start", 1, true);
     map_pub_ = nh.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
@@ -133,18 +133,28 @@ public:
   ~Manager(){}
 };
 
-bool Manager::RelocalizationService(skyee_msg::Relocalization::Request &req,skyee_msg::Relocalization::Response &res)
+bool Manager::RelocalizationService(movexbot_msgs::Relocalization::Request &req,movexbot_msgs::Relocalization::Response &res)
 {
   geometry_msgs::Pose initial_pose;
-  initial_pose.position.x = req.robot_pose.x * map_data_.mapping_resolution;
-  initial_pose.position.y = req.robot_pose.y * map_data_.mapping_resolution;;
+  initial_pose.position.x = req.robot_pose.x * map_data_.map_info.resolution;
+  initial_pose.position.y = req.robot_pose.y * map_data_.map_info.resolution;
   initial_pose.orientation = tf::createQuaternionMsgFromYaw(req.robot_pose.theta);
+  ROS_INFO("relocalization...");
   SetInitialPose(initial_pose);
 
   //TODO:增加对定位状态的判断，是否产生约束，如产生正确约束并跳转位置，就直接返回成功，如超过3s未产生正确约束并跳转位置就返回失败
-  ros::Duration(3).sleep();
-  skyee_msg::androidConsole slam_state_msg;
+  ros::Rate loop(100);
+  ros::Time start_time = ros::Time::now();
+  while (ros::ok())
+  {
+    if((ros::Time::now() - start_time).toSec() > 3)
+      break;
+    ros::spinOnce();
+    loop.sleep();
+  }
+  movexbot_msgs::androidConsole slam_state_msg;
   slam_state_msg.model.data = "localization_success";
+  slam_state_msg.name.data = map_data_.map_name;
   slam_state_pub_.publish(slam_state_msg);
   res.state = true;
   return true;
@@ -156,8 +166,9 @@ void Manager::HandleInitialPose(const geometry_msgs::PoseWithCovarianceStamped &
 }
 
 //TODO:当前坐标点为图像像素坐标，需修改为map坐标系
-void Manager::HandleAppInitialPose(const skyee_msg::destination_point &pose_msg)
+void Manager::HandleAppInitialPose(const movexbot_msgs::destination_point &pose_msg)
 {
+  ROS_INFO("set initial_pose:(%d,%d,%f) by app...",pose_msg.gridPosition.x,pose_msg.gridPosition.y,pose_msg.angle);
   geometry_msgs::Pose initial_pose;
   initial_pose.position.x = pose_msg.gridPosition.x * map_data_.map_info.resolution + map_data_.map_info.origin.position.x;
   initial_pose.position.y = pose_msg.gridPosition.y * map_data_.map_info.resolution + map_data_.map_info.origin.position.y;
@@ -165,7 +176,7 @@ void Manager::HandleAppInitialPose(const skyee_msg::destination_point &pose_msg)
   SetInitialPose(initial_pose);
 }
 
-void Manager::HandleSlamState(const skyee_msg::androidConsole &msg)
+void Manager::HandleSlamState(const movexbot_msgs::androidConsole &msg)
 {
   static std_msgs::Bool flag_msg;
   if(msg.model.data == "mapping_start")
@@ -206,7 +217,7 @@ void Manager::HandleSlamState(const skyee_msg::androidConsole &msg)
 
 void Manager::HandleRobotPose(const geometry_msgs::PoseStamped &pose) //only for mapping mode
 {
-  static skyee_msg::robotPos robot_grid_pose;
+  static movexbot_msgs::robotPos robot_grid_pose;
   robot_grid_pose.angle = tf::getYaw(pose.pose.orientation);
   robot_grid_pose.gridPosition.x = round(pose.pose.position.x / map_data_.app_map.resolution);
   robot_grid_pose.gridPosition.y = round(pose.pose.position.y / map_data_.app_map.resolution);
@@ -228,7 +239,7 @@ void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers)
       ROS_ERROR("current map name:%s,station map name:%s",map_data_.map_name.c_str(),station.second.map_name.c_str());
       if(map_data_.map_name != station.second.map_name)
       {
-        skyee_msg::androidConsole slam_state_msg;
+        movexbot_msgs::androidConsole slam_state_msg;
         slam_state_msg.model.data = "localization_start";
         slam_state_msg.name.data = station.second.map_name;
         slam_state_pub_.publish(slam_state_msg);
@@ -253,7 +264,7 @@ void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers)
           tf::poseTFToMsg(new_base_link_to_map,new_base_link_pose);
           SetInitialPose(new_base_link_pose);
 
-          skyee_msg::androidConsole slam_state_msg;
+          movexbot_msgs::androidConsole slam_state_msg;
           slam_state_msg.model.data = "localization_success";
           slam_state_msg.name.data = map_data_.map_name;
           slam_state_pub_.publish(slam_state_msg);
@@ -265,48 +276,48 @@ void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers)
   dock_station_sub_.shutdown();
 }
 
-void Manager::HandleStationTag(const geometry_msgs::PoseStamped &tag_pose) //TODO:to delete
-{
-  if(slam_state_ == SlamState::SLAM_STATE_LOCATING)
-  {
-    std::ifstream fin(FLAGS_map_folder_path + map_data_.map_name + "/ChargerStation/station.yaml");
-    if (fin.is_open())
-    {
-      YAML::Node charger_station_yaml;
-      charger_station_yaml = YAML::Load(fin);
-      if (charger_station_yaml.IsNull())
-        ROS_ERROR("station yaml is null!");
-      else
-      {
-        tf::Transform tag_to_map;
-        tag_to_map.getOrigin().setX(charger_station_yaml["gridX"].as<int>()*FLAGS_resolution);
-        tag_to_map.getOrigin().setY(charger_station_yaml["gridY"].as<int>()*FLAGS_resolution);
-        tag_to_map.setRotation(tf::createQuaternionFromYaw(charger_station_yaml["angle"].as<float>()));
-        if(listener_.waitForTransform("/base_link", tag_pose.header.frame_id, tag_pose.header.stamp, ros::Duration(1.0)))
-        {
-          geometry_msgs::PoseStamped tag_pose_base_link;
-          listener_.transformPose("/base_link",tag_pose,tag_pose_base_link);
-          tf::StampedTransform tag_to_base_link;
-          tag_to_base_link.getOrigin().setX(tag_pose_base_link.pose.position.x);
-          tag_to_base_link.getOrigin().setY(tag_pose_base_link.pose.position.y);
-          tag_to_base_link.setRotation(tf::createQuaternionFromYaw(tf::getYaw(tag_pose_base_link.pose.orientation)));
-          tf::Transform new_base_link_to_map = tag_to_map * tag_to_base_link.inverse();
-          geometry_msgs::Pose new_base_link_pose;
-          tf::poseTFToMsg(new_base_link_to_map,new_base_link_pose);
-          SetInitialPose(new_base_link_pose);
-          skyee_msg::androidConsole slam_state_msg;
-          slam_state_msg.model.data = "localization_success";
-          slam_state_msg.name.data = map_data_.map_name;
-          slam_state_pub_.publish(slam_state_msg);
-          ROS_INFO("have found tag station,location success.");
-        }
-      }
-    }
-    else
-      ROS_ERROR("no station yaml file!");
-  }
-  aruco_tag_sub_.shutdown();
-}
+// void Manager::HandleStationTag(const geometry_msgs::PoseStamped &tag_pose) //TODO:to delete
+// {
+//   if(slam_state_ == SlamState::SLAM_STATE_LOCATING)
+//   {
+//     std::ifstream fin(FLAGS_map_folder_path + map_data_.map_name + "/ChargerStation/station.yaml");
+//     if (fin.is_open())
+//     {
+//       YAML::Node charger_station_yaml;
+//       charger_station_yaml = YAML::Load(fin);
+//       if (charger_station_yaml.IsNull())
+//         ROS_ERROR("station yaml is null!");
+//       else
+//       {
+//         tf::Transform tag_to_map;
+//         tag_to_map.getOrigin().setX(charger_station_yaml["gridX"].as<int>()*FLAGS_resolution);
+//         tag_to_map.getOrigin().setY(charger_station_yaml["gridY"].as<int>()*FLAGS_resolution);
+//         tag_to_map.setRotation(tf::createQuaternionFromYaw(charger_station_yaml["angle"].as<float>()));
+//         if(listener_.waitForTransform("/base_link", tag_pose.header.frame_id, tag_pose.header.stamp, ros::Duration(1.0)))
+//         {
+//           geometry_msgs::PoseStamped tag_pose_base_link;
+//           listener_.transformPose("/base_link",tag_pose,tag_pose_base_link);
+//           tf::StampedTransform tag_to_base_link;
+//           tag_to_base_link.getOrigin().setX(tag_pose_base_link.pose.position.x);
+//           tag_to_base_link.getOrigin().setY(tag_pose_base_link.pose.position.y);
+//           tag_to_base_link.setRotation(tf::createQuaternionFromYaw(tf::getYaw(tag_pose_base_link.pose.orientation)));
+//           tf::Transform new_base_link_to_map = tag_to_map * tag_to_base_link.inverse();
+//           geometry_msgs::Pose new_base_link_pose;
+//           tf::poseTFToMsg(new_base_link_to_map,new_base_link_pose);
+//           SetInitialPose(new_base_link_pose);
+//           movexbot_msgs::androidConsole slam_state_msg;
+//           slam_state_msg.model.data = "localization_success";
+//           slam_state_msg.name.data = map_data_.map_name;
+//           slam_state_pub_.publish(slam_state_msg);
+//           ROS_INFO("have found tag station,location success.");
+//         }
+//       }
+//     }
+//     else
+//       ROS_ERROR("no station yaml file!");
+//   }
+//   aruco_tag_sub_.shutdown();
+// }
 
 void Manager::MapPublishThread(Manager *manager)
 {
@@ -369,7 +380,7 @@ void Manager::MapPublish(void)
   map_data_.app_map.data = data_encode;
   map_android_pub_.publish(map_data_.app_map);
   
-  skyee_msg::mapInfo map_info;
+  movexbot_msgs::mapInfo map_info;
   map_info.gridWidth = map_data_.app_map.width;
   map_info.gridHeight = map_data_.app_map.height;
   map_info.resolution = map_data_.app_map.resolution;
@@ -455,7 +466,7 @@ void Manager::StartLocalization(std::string map_name)
   if (FLAGS_start_trajectory_with_default_topics) {
     node_->StartTrajectoryWithDefaultTopics(trajectory_options_localization);
   }
-  aruco_tag_sub_ = nh.subscribe("/aruco_single/pose",1,&Manager::HandleStationTag,this);
+  // aruco_tag_sub_ = nh.subscribe("/aruco_single/pose",1,&Manager::HandleStationTag,this);
   dock_station_sub_ = nh.subscribe("/aruco_marker_publisher/markers",1,&Manager::HandleDockStation,this);
 }
 
@@ -473,6 +484,7 @@ void Manager::SetInitialPose(const geometry_msgs::Pose &initial_pose)
 {
   if(!node_)
     return;
+  ROS_INFO("initial_pose:(%f,%f,%f)",initial_pose.position.x,initial_pose.position.y,tf::getYaw(initial_pose.orientation));
   slam_state_ = SlamState::SLAM_STATE_LOCATING;
   node_->FinishLastTrajectory(); //TODO: delete the last trajectory to avoid memory increase
   TrajectoryOptions initial_pose_trajectory_options_localization = trajectory_options_localization;
