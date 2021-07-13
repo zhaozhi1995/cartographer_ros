@@ -35,6 +35,7 @@ set(PACKAGE_DEPENDENCIES
   visualization_msgs
   movexbot_msgs
   aruco_msgs
+  navigation
 )
 
 if(WIN32)

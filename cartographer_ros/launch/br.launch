@@ -2,7 +2,7 @@
 <!-- start the cartographer node -->
 
  <node name="cartographer_node" pkg="cartographer_ros" type="cartographer_node" respawn="true" output="screen"
-       args="-map_folder_path $(env WORK_PATH)/Map/
+       args="-map_folder_path $(env WORK_FOLDER_PATH)/Map/
           -configuration_basename br.lua
           -configuration_basename_localization localization.lua
           -use_manager=false

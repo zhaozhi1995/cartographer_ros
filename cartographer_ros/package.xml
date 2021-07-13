@@ -65,6 +65,7 @@
   <depend>visualization_msgs</depend>
   <depend>movexbot_msgs</depend>
   <depend>aruco_msgs</depend>
+  <depend>navigation</depend>
 
   <test_depend>rosunit</test_depend>
 

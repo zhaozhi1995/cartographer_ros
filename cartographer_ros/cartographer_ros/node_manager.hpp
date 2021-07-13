@@ -27,8 +27,10 @@
 #include <yaml-cpp/yaml.h>
 #include <thread>
 #include <aruco_msgs/MarkerArray.h>
-#include <cartographer_ros/StationID.hpp>
+#include <navigation/StationID.hpp>
+#include <navigation/Common.hpp>
 #include <movexbot_msgs/Relocalization.h>
+
 
 DEFINE_bool(collect_metrics, false,
             "Activates the collection of runtime metrics. If activated, the "
@@ -98,7 +100,6 @@ private:
   void CloseLocalization(void);
   void SetInitialPose(const geometry_msgs::Pose &pose);
   void SaveMap(std::string map_name);
-  cv::Mat OccupancyGridToMat(const nav_msgs::OccupancyGrid &map);
   std::unique_ptr<nav_msgs::OccupancyGrid> GetOccupancyGridMap(float resolution);
   void HandleInitialPose(const geometry_msgs::PoseWithCovarianceStamped &pose_msg);
   void HandleAppInitialPose(const movexbot_msgs::destination_point &pose_msg);
@@ -190,6 +191,11 @@ void Manager::HandleSlamState(const movexbot_msgs::androidConsole &msg)
     flag_msg.data = true;
     close_pub_.publish(flag_msg);
     CloseMapping(msg.name.data);
+
+    movexbot_msgs::androidConsole slam_state_msg;
+    slam_state_msg.model.data = "localization_start";
+    slam_state_msg.name.data = msg.name.data;
+    slam_state_pub_.publish(slam_state_msg);
   }
   else if(msg.model.data == "localization_start")
   {
@@ -236,7 +242,7 @@ void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers)
     auto station = dock_station_.GetStation(markers.markers.front().id);
     if(station.first)
     {
-      ROS_ERROR("current map name:%s,station map name:%s",map_data_.map_name.c_str(),station.second.map_name.c_str());
+      ROS_INFO("current map name:%s,station map name:%s",map_data_.map_name.c_str(),station.second.map_name.c_str());
       if(map_data_.map_name != station.second.map_name)
       {
         movexbot_msgs::androidConsole slam_state_msg;
@@ -273,7 +279,8 @@ void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers)
       }
     }
   }
-  dock_station_sub_.shutdown();
+  else
+    dock_station_sub_.shutdown();
 }
 
 // void Manager::HandleStationTag(const geometry_msgs::PoseStamped &tag_pose) //TODO:to delete
@@ -354,7 +361,7 @@ void Manager::MapPublish(void)
   auto trajectory_node_list = node_->GetMapBuilderBridge()->GetTrajectoryNodeList();
   for(auto &trajectory_node: trajectory_node_list.markers)
   {
-    cv::Vec3b color(trajectory_node.color.b*255,trajectory_node.color.g*255,trajectory_node.color.r*255);
+    cv::Vec4b color(trajectory_node.color.b*255,trajectory_node.color.g*255,trajectory_node.color.r*255,0xFF);
     cv::Point last_point(0,0);
     for(auto &point:trajectory_node.points)
     {
@@ -406,7 +413,12 @@ void Manager::StartMapping(std::string map_name,uint32_t app_map_size_max)
 {
   ROS_INFO("start mapping!map_name:%s",map_name.c_str());
   if(node_)
+  {
+    node_->FinishAllTrajectories();
+    LOG(INFO) << "reset node ...";
     node_.reset();
+    LOG(INFO) << "reset node done";
+  }
   map_data_.app_map_size_max = app_map_size_max * 10; //png compress will decrease data size tenfold
   auto map_builder = cartographer::mapping::CreateMapBuilder(node_options.map_builder_options);
   node_ = boost::shared_ptr<Node>(new Node(node_options, std::move(map_builder), tf_buffer_,FLAGS_collect_metrics));
@@ -437,7 +449,9 @@ void Manager::CloseMapping(std::string map_name)
     node_->RunFinalOptimization();
     SaveMap(map_name);
   }
+  LOG(INFO) << "reset node ...";
   node_.reset();
+  LOG(INFO) << "reset node done";
 }
 
 void Manager::StartLocalization(std::string map_name)
@@ -446,7 +460,12 @@ void Manager::StartLocalization(std::string map_name)
   if(map_name.empty() || FLAGS_map_folder_path.empty())
     return;
   if(node_)
+  {
+    node_->FinishAllTrajectories();
+    LOG(INFO) << "reset node ...";
     node_.reset();
+    LOG(INFO) << "reset node done";
+  }
   if(!boost::filesystem::exists(FLAGS_map_folder_path + map_name + "/" + map_name + ".pbstream"))
   {
     ROS_ERROR("the pbstream file is not exist,return!");
@@ -475,7 +494,10 @@ void Manager::CloseLocalization(void)
   ROS_INFO("close localization!");
   if(node_)
   {
+    node_->FinishAllTrajectories();
+    LOG(INFO) << "reset node ...";
     node_.reset();
+    LOG(INFO) << "reset node done";
     slam_state_ = SlamState::SLAM_STATE_STANDBY;
   }
 }
@@ -532,47 +554,6 @@ void Manager::SaveMap(std::string map_name)
           map->info.origin.position.x, map->info.origin.position.y, tf::getYaw(map->info.origin.orientation));
   fclose(yaml);
   ROS_INFO("map saved done!");
-}
-
-cv::Mat Manager::OccupancyGridToMat(const nav_msgs::OccupancyGrid &map)
-{
-#if 1
-  cv::Mat colorMat = cv::Mat(map.info.height, map.info.width, CV_8UC3);
-  for (unsigned int y = 0; y < map.info.height; y++)
-  {
-    for (unsigned int x = 0; x < map.info.width; x++)
-    {
-      cv::Vec3b &rgb = colorMat.at<cv::Vec3b>(y, x);
-      unsigned int i = x + (map.info.height - y - 1) * map.info.width;
-      if ((map.data[i] >= 0) && (map.data[i] <= 40))        //free space
-        rgb[0] = rgb[1] = rgb[2] = 0xFF;//white
-      else if ((map.data[i] <= 50) && (map.data[i] > 40))   //
-        rgb[0] = rgb[1] = rgb[2] = 0xBE;
-      else if ((map.data[i] <= 100) && (map.data[i] > 50))  //obstacle
-        rgb[0] = rgb[1] = rgb[2] = 0;//black
-      else                                                  //unknow
-        rgb[0] = rgb[1] = rgb[2] = 0xd9;
-    }
-  }
-#else
-  cv::Mat colorMat = cv::Mat(map.info.height, map.info.width, CV_8U);
-  for (unsigned int y = 0; y < map.info.height; y++)
-  {
-    for (unsigned int x = 0; x < map.info.width; x++)
-    {
-      unsigned int i = x + (map.info.height - y - 1) * map.info.width;
-      if ((map.data[i] >= 0) && (map.data[i] <= 40))
-        colorMat.at<uchar>(y, x) = 0xFF;
-      else if ((map.data[i] <= 65) && (map.data[i] > 40))
-        colorMat.at<uchar>(y, x) = 0xBE;
-      else if ((map.data[i] <= 100) && (map.data[i] > 65))
-        colorMat.at<uchar>(y, x) = 0;
-      else
-        colorMat.at<uchar>(y, x) = 0xd9;
-    }
-  }
-#endif
-  return colorMat;
 }
 
 }  // namespace cartographer_ros
