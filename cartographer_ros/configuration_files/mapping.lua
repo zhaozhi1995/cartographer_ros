@@ -57,6 +57,7 @@ TRAJECTORY_BUILDER_2D.use_online_correlative_scan_matching = true
 TRAJECTORY_BUILDER_2D.ceres_scan_matcher.occupied_space_weight = 1 -- 点云信任度
 TRAJECTORY_BUILDER_2D.ceres_scan_matcher.translation_weight = 10 --15 --推演位姿平移信任度
 TRAJECTORY_BUILDER_2D.ceres_scan_matcher.rotation_weight = 40  --推演位姿旋转信任度
+TRAJECTORY_BUILDER_2D.num_accumulated_range_data = 1 --用于一组扫描匹配的激光的数据量
 
 POSE_GRAPH.constraint_builder.log_matches = false  --是否打印直方图日志，查看ceres优化扫描匹配日志
 POSE_GRAPH.optimize_every_n_nodes = 60

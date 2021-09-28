@@ -16,17 +16,28 @@
 
 <launch>
   <param name="/use_sim_time" value="true" />
-  <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/test.bag"/>
+  <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/test.bag"/> -->
   <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/5f.bag"/> -->
-  <!-- <arg name="bag_filename" default="/home/movejbot/bag/5f.bag"/> -->
+  <arg name="bag_filename" default="/home/movexbot/temp/bag/ltme02/map_test_2021-09-28-11-40-02.bag"/>
   
-  <param name="robot_description"
-    textfile="$(find cartographer_ros)/urdf/movexbot.urdf" />
+  <!-- <param name="robot_description"
+    textfile="$(find cartographer_ros)/urdf/demo.urdf" />
 
   <node name="robot_state_publisher" pkg="robot_state_publisher"
-    type="robot_state_publisher" />
+    type="robot_state_publisher" /> -->
 
-  <include file="$(find cartographer_ros)/launch/movexbot.launch" />
+  <node name="cartographer_node" pkg="cartographer_ros"
+      type="cartographer_node" args="
+          -map_folder_path $(env WORK_FOLDER_PATH)/Map/
+          -configuration_directory $(find cartographer_ros)/configuration_files
+          -configuration_basename mapping.lua
+          -configuration_basename_localization localization.lua
+          -use_manager=false"
+      output="screen">
+    <remap from="scan" to="nav_scan" />
+    <remap from="scan_1" to="nav_scan" />
+    <remap from="scan_2" to="camera_3_scan" />
+  </node>
 
   <node name="rviz" pkg="rviz" type="rviz" required="true"
       args="-d $(find cartographer_ros)/configuration_files/demo_2d.rviz" />

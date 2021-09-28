@@ -27,8 +27,8 @@
 #include <yaml-cpp/yaml.h>
 #include <thread>
 #include <aruco_msgs/MarkerArray.h>
-#include <navigation/StationID.hpp>
-#include <navigation/Common.hpp>
+#include <navigation/lib/StationID.hpp>
+#include <navigation/lib/Common.hpp>
 #include <movexbot_msgs/Relocalization.h>
 
 
@@ -140,7 +140,7 @@ bool Manager::RelocalizationService(movexbot_msgs::Relocalization::Request &req,
   initial_pose.position.x = req.robot_pose.x * map_data_.map_info.resolution;
   initial_pose.position.y = req.robot_pose.y * map_data_.map_info.resolution;
   initial_pose.orientation = tf::createQuaternionMsgFromYaw(req.robot_pose.theta);
-  ROS_INFO("relocalization...");
+  LOG(INFO) << "relocalization...";
   SetInitialPose(initial_pose);
 
   //TODO:增加对定位状态的判断，是否产生约束，如产生正确约束并跳转位置，就直接返回成功，如超过3s未产生正确约束并跳转位置就返回失败
@@ -157,7 +157,7 @@ bool Manager::RelocalizationService(movexbot_msgs::Relocalization::Request &req,
   slam_state_msg.model.data = "localization_success";
   slam_state_msg.name.data = map_data_.map_name;
   slam_state_pub_.publish(slam_state_msg);
-  res.state = true;
+  res.state = res.STATE_SUCCESS;
   return true;
 }
 
@@ -192,10 +192,13 @@ void Manager::HandleSlamState(const movexbot_msgs::androidConsole &msg)
     close_pub_.publish(flag_msg);
     CloseMapping(msg.name.data);
 
-    movexbot_msgs::androidConsole slam_state_msg;
-    slam_state_msg.model.data = "localization_start";
-    slam_state_msg.name.data = msg.name.data;
-    slam_state_pub_.publish(slam_state_msg);
+    if(!msg.name.data.empty())
+    {
+      movexbot_msgs::androidConsole slam_state_msg;
+      slam_state_msg.model.data = "localization_start";
+      slam_state_msg.name.data = msg.name.data;
+      slam_state_pub_.publish(slam_state_msg);
+    }
   }
   else if(msg.model.data == "localization_start")
   {
@@ -374,11 +377,15 @@ void Manager::MapPublish(void)
       last_point = new_point;
     }
   }
+  ROS_INFO("time cost0:%f",(ros::Time::now() - start).toSec());
   // cv::imshow("a",mat);
   // cv::waitKey(1);
   
+  static std::vector<int> compression_params = {CV_IMWRITE_PNG_COMPRESSION,5};
   std::vector<uchar> data_encode;
-  cv::imencode(".png", mat, data_encode);
+  start = ros::Time::now();
+  cv::imencode(".png", mat, data_encode,compression_params);
+  ROS_WARN("time cost1:%f",(ros::Time::now() - start).toSec());
   map_data_.app_map.width = mat.cols;
   map_data_.app_map.height = mat.rows;
   map_data_.app_map.resolution = map->info.resolution;
@@ -394,12 +401,14 @@ void Manager::MapPublish(void)
   map_info.originX = map_data_.app_map.originX;
   map_info.originY = map_data_.app_map.originY;
   mapping_map_info_.publish(map_info);
-  ROS_INFO("time cost:%f",(ros::Time::now() - start).toSec());
   
-  start = ros::Time::now();
-  map = GetOccupancyGridMap(FLAGS_resolution);
-  map_pub_.publish(*map);
-  ROS_ERROR("time cost2:%f",(ros::Time::now() - start).toSec());
+  if(map_pub_.getNumSubscribers() > 0)
+  {
+    start = ros::Time::now();
+    map = GetOccupancyGridMap(FLAGS_resolution);
+    map_pub_.publish(*map);
+    ROS_INFO("time cost2:%f",(ros::Time::now() - start).toSec());
+  }
 }
 
 std::unique_ptr<nav_msgs::OccupancyGrid> Manager::GetOccupancyGridMap(float resolution)
@@ -437,7 +446,7 @@ void Manager::StartMapping(std::string map_name,uint32_t app_map_size_max)
 
 void Manager::CloseMapping(std::string map_name)
 {
-  ROS_INFO("close mapping!map name:%s",map_name.c_str());
+  LOG(INFO) << "close mapping!map name:" << map_name.c_str();
   if(!node_)
     return;
   slam_state_ = SlamState::SLAM_STATE_STANDBY;
@@ -456,7 +465,7 @@ void Manager::CloseMapping(std::string map_name)
 
 void Manager::StartLocalization(std::string map_name)
 {
-  ROS_INFO("start localization!map name:%s",map_name.c_str());
+  LOG(WARNING) << "start localization!map name:" << map_name;
   if(map_name.empty() || FLAGS_map_folder_path.empty())
     return;
   if(node_)
@@ -506,14 +515,14 @@ void Manager::SetInitialPose(const geometry_msgs::Pose &initial_pose)
 {
   if(!node_)
     return;
-  ROS_INFO("initial_pose:(%f,%f,%f)",initial_pose.position.x,initial_pose.position.y,tf::getYaw(initial_pose.orientation));
+  LOG(INFO) << GetFormatString("initial_pose:(%f,%f,%f)",initial_pose.position.x,initial_pose.position.y,tf::getYaw(initial_pose.orientation));
   slam_state_ = SlamState::SLAM_STATE_LOCATING;
   node_->FinishLastTrajectory(); //TODO: delete the last trajectory to avoid memory increase
   TrajectoryOptions initial_pose_trajectory_options_localization = trajectory_options_localization;
 
   const auto pose = ToRigid3d(initial_pose);
   if (!pose.IsValid()) {
-    ROS_ERROR("Invalid pose argument. Orientation quaternion must be normalized.");
+    LOG(ERROR) << "Invalid pose argument. Orientation quaternion must be normalized.";
     return;
   }
 

@@ -83,9 +83,43 @@ void Run() {
 }  // namespace
 }  // namespace cartographer_ros
 
+void InitGoogleLog(std::string node_name)
+{
+  time_t raw_time;
+
+   // 时间判断
+  time(&raw_time);
+  char tmp[64];
+  strftime(tmp,sizeof(tmp),"%Y-%m-%d",localtime(&raw_time));
+  std::string  str = tmp;
+  std::string work_folder_path = std::getenv("WORK_FOLDER_PATH");
+  std::string log_path = work_folder_path+"/Log/"+str+"/"+node_name+"/";
+  google::InitGoogleLogging(node_name.c_str()); //链接文件名
+  google::SetGoogleLogPath(log_path);  //判断当前路径下文件夹是否存在
+  
+  google::SetStderrLogging(google::WARNING);
+  FLAGS_colorlogtostderr = true; //设置输出到屏幕的日志显示相应颜色
+   
+  FLAGS_servitysinglelog = false;// 用来按照等级区分log文件
+  google::SetLogSymlink(google::GLOG_FATAL,"");
+  google::SetLogSymlink(google::GLOG_ERROR,"");
+  google::SetLogSymlink(google::GLOG_WARNING,"");
+  google::SetLogSymlink(google::GLOG_INFO,"");
+  google::SetLogDestination(google::GLOG_FATAL,(log_path +"/"+ node_name+"_fatal").c_str()); // 设置 google::FATAL 级别的日志存储路径和文件名前缀
+  google::SetLogDestination(google::GLOG_ERROR, (log_path+"/"+node_name+"_error").c_str()); //设置 google::ERROR 级别的日志存储路径和文件名前缀
+  google::SetLogDestination(google::GLOG_WARNING,(log_path+"/"+node_name+"_warning").c_str()); //设置 google::WARNING 级别的日志存储路径和文件名前缀
+  google::SetLogDestination(google::GLOG_INFO, (log_path+"/"+node_name+"_info").c_str()); //设置 google::INFO 级别的日志存储路径和文件名前缀
+  google::SetLogFilenameExtension(".log");
+
+  FLAGS_logbufsecs = 0; //缓冲日志输出，默认为30秒，此处改为立即输出
+  FLAGS_max_log_size = 100; //最大日志大小为 100MB
+  FLAGS_stop_logging_if_full_disk = true; //当磁盘被写满时，停止日志输出
+}
+
 int main(int argc, char** argv) {
-  google::InitGoogleLogging(argv[0]);
+  // google::InitGoogleLogging(argv[0]);
   google::ParseCommandLineFlags(&argc, &argv, true);
+  InitGoogleLog("cartographer_node");
 
   CHECK(!FLAGS_configuration_directory.empty())
       << "-configuration_directory is missing.";

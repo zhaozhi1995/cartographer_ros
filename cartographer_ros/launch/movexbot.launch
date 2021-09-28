@@ -24,5 +24,7 @@
           -use_manager=true"
       output="screen">
     <remap from="scan" to="nav_scan" />
+    <remap from="scan_1" to="nav_scan" />
+    <remap from="scan_2" to="camera_3_scan" />
   </node>
 </launch>
