@@ -27,8 +27,8 @@
 #include <yaml-cpp/yaml.h>
 #include <thread>
 #include <aruco_msgs/MarkerArray.h>
-#include <navigation/lib/StationID.hpp>
-#include <navigation/lib/Common.hpp>
+#include <lib/StationID.hpp>
+#include <lib/Common.hpp>
 #include <movexbot_msgs/Relocalization.h>
 #include <movexbot_msgs/SetSlamCmd.h>
 
