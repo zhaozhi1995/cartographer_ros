@@ -30,6 +30,7 @@
 #include <navigation/lib/StationID.hpp>
 #include <navigation/lib/Common.hpp>
 #include <movexbot_msgs/Relocalization.h>
+#include <movexbot_msgs/SetSlamCmd.h>
 
 
 DEFINE_bool(collect_metrics, false,
@@ -86,29 +87,30 @@ private:
   NodeOptions node_options;
   TrajectoryOptions trajectory_options,trajectory_options_localization;
   tf2_ros::Buffer* tf_buffer_;
-  ros::Subscriber initial_pose_sub_,app_initial_pose_sub_,robot_pose_sub_,slam_state_sub_,aruco_tag_sub_,dock_station_sub_;
-  ros::Publisher map_android_pub_,mapping_map_info_,robot_grid_pos_pub_,map_pub_,start_pub_,close_pub_,slam_state_pub_;
-  ros::ServiceServer relocalization_service_;
+  ros::Subscriber initial_pose_sub_,app_initial_pose_sub_,robot_pose_sub_,slam_state_sub_,dock_station_sub_;
+  ros::Publisher map_android_pub_,mapping_map_info_,robot_grid_pos_pub_,map_pub_,slam_state_pub_;
+  ros::ServiceServer relocalization_service_,slam_cmd_service_;
   ros::NodeHandle nh;
   MapData_t map_data_;
   tf::TransformListener listener_;
   StationID dock_station_;
 
-  void StartMapping(std::string map_name,uint32_t app_map_size_max);
+  void StartMapping(std::string map_name);
   void CloseMapping(std::string map_name);
   void StartLocalization(std::string map_name);
   void CloseLocalization(void);
   void SetInitialPose(const geometry_msgs::Pose &pose);
+  void SetLocalizationSucceed(void);
   void SaveMap(std::string map_name);
   std::unique_ptr<nav_msgs::OccupancyGrid> GetOccupancyGridMap(float resolution);
   void HandleInitialPose(const geometry_msgs::PoseWithCovarianceStamped &pose_msg);
   void HandleAppInitialPose(const movexbot_msgs::destination_point &pose_msg);
   void HandleSlamState(const movexbot_msgs::androidConsole &msg);
   void HandleRobotPose(const geometry_msgs::PoseStamped &pose);
-  void HandleStationTag(const geometry_msgs::PoseStamped &tag_pose);//TODO:to delete
   void HandleDockStation(const aruco_msgs::MarkerArray &markers);
   void MapPublish(void);
   bool RelocalizationService(movexbot_msgs::Relocalization::Request &req,movexbot_msgs::Relocalization::Response &res);
+  bool SetSlamCmdService(movexbot_msgs::SetSlamCmd::Request &req,movexbot_msgs::SetSlamCmd::Response &res);
   static void MapPublishThread(Manager *manager);
 public:
   Manager(tf2_ros::Buffer* tf_buffer)
@@ -119,20 +121,49 @@ public:
     std::tie(node_options, trajectory_options_localization) = LoadOptions(FLAGS_configuration_directory, FLAGS_configuration_basename_localization);
     initial_pose_sub_ = nh.subscribe("/initialpose",1, &Manager::HandleInitialPose,this);
     app_initial_pose_sub_ = nh.subscribe("/nav/cmd/initPose", 1, &Manager::HandleAppInitialPose, this);
-    slam_state_sub_ = nh.subscribe("/scan/cmd/slam_state", 1, &Manager::HandleSlamState,this);
+    // slam_state_sub_ = nh.subscribe("/scan/cmd/slam_state", 1, &Manager::HandleSlamState,this);
     slam_state_pub_ = nh.advertise<movexbot_msgs::androidConsole>("/scan/cmd/slam_state",1);
     map_android_pub_ = nh.advertise<movexbot_msgs::mapAndroid>("/map_android_picture", 1);
     mapping_map_info_ = nh.advertise<movexbot_msgs::mapInfo>("/mapping_map_info", 1);
     robot_grid_pos_pub_ = nh.advertise<movexbot_msgs::robotPos>("robot_pos", 1);
-    close_pub_ = nh.advertise<std_msgs::Bool>("cartographer_complete", 1, true);
-    start_pub_ = nh.advertise<std_msgs::Bool>("cartographer_start", 1, true);
     map_pub_ = nh.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
     relocalization_service_ = nh.advertiseService("slam/relocalization_service",&Manager::RelocalizationService,this);
+    slam_cmd_service_ = nh.advertiseService("slam/set_cmd",&Manager::SetSlamCmdService,this);
     std::thread map_publish_thread(MapPublishThread,this);
     map_publish_thread.detach();
   };
   ~Manager(){}
 };
+
+bool Manager::SetSlamCmdService(movexbot_msgs::SetSlamCmd::Request &req,movexbot_msgs::SetSlamCmd::Response &res)
+{  
+  switch (req.cmd)
+  {
+    case req.SLAM_CMD_STANDBY:
+      {
+        if(slam_state_ == SlamState::SLAM_STATE_MAPPING)
+          CloseMapping(req.map_name);
+        else if(slam_state_ == SlamState::SLAM_STATE_LOCATING || slam_state_ == SlamState::SLAM_STATE_LOCATE_SUCCEED)
+          CloseLocalization();
+      }
+      break;
+    case req.SLAM_CMD_LOCATING:
+      StartLocalization(req.map_name);
+      break;
+
+    case req.SLAM_CMD_LOCATE_SUCCEED:
+      SetLocalizationSucceed();
+      break;
+
+    case req.SLAM_CMD_MAPPING:
+      StartMapping(req.map_name);
+      break;
+    
+    default:
+      break;
+  }
+  return true;
+}
 
 bool Manager::RelocalizationService(movexbot_msgs::Relocalization::Request &req,movexbot_msgs::Relocalization::Response &res)
 {
@@ -153,10 +184,8 @@ bool Manager::RelocalizationService(movexbot_msgs::Relocalization::Request &req,
     ros::spinOnce();
     loop.sleep();
   }
-  movexbot_msgs::androidConsole slam_state_msg;
-  slam_state_msg.model.data = "localization_success";
-  slam_state_msg.name.data = map_data_.map_name;
-  slam_state_pub_.publish(slam_state_msg);
+  if(slam_state_ == SlamState::SLAM_STATE_LOCATING)
+    SetLocalizationSucceed();
   res.state = res.STATE_SUCCESS;
   return true;
 }
@@ -179,49 +208,16 @@ void Manager::HandleAppInitialPose(const movexbot_msgs::destination_point &pose_
 
 void Manager::HandleSlamState(const movexbot_msgs::androidConsole &msg)
 {
-  static std_msgs::Bool flag_msg;
   if(msg.model.data == "mapping_start")
-  {
-    flag_msg.data = true;
-    start_pub_.publish(flag_msg);
-    StartMapping(msg.name.data,(msg.mapArea!=0)?msg.mapArea:40000);
-  }
+    StartMapping(msg.name.data);
   else if(msg.model.data == "mapping_close")
-  {
-    flag_msg.data = true;
-    close_pub_.publish(flag_msg);
     CloseMapping(msg.name.data);
-
-    if(!msg.name.data.empty())
-    {
-      movexbot_msgs::androidConsole slam_state_msg;
-      slam_state_msg.model.data = "localization_start";
-      slam_state_msg.name.data = msg.name.data;
-      slam_state_pub_.publish(slam_state_msg);
-    }
-  }
   else if(msg.model.data == "localization_start")
-  {
-    flag_msg.data = true;
-    start_pub_.publish(flag_msg);
     StartLocalization(msg.name.data);
-  }
   else if(msg.model.data == "localization_close")
-  {
-    flag_msg.data = true;
-    close_pub_.publish(flag_msg);
     CloseLocalization();
-  }
   else if(msg.model.data == "localization_success")
-  {
-    ROS_INFO("localization_success");
-    slam_state_ = SlamState::SLAM_STATE_LOCATE_SUCCEED;
-  }
-  else if(msg.model.data == "cancel_localization_success_flag")
-  {
-    ROS_INFO("cancel_localization_success_flag");
-    slam_state_ = SlamState::SLAM_STATE_LOCATING;
-  }
+    SetLocalizationSucceed();
 }
 
 void Manager::HandleRobotPose(const geometry_msgs::PoseStamped &pose) //only for mapping mode
@@ -238,7 +234,7 @@ void Manager::HandleRobotPose(const geometry_msgs::PoseStamped &pose) //only for
   robot_grid_pos_pub_.publish(robot_grid_pose);
 }
 
-void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers)
+void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers) //TODO: consider move to navigation
 {
   if(slam_state_ == SlamState::SLAM_STATE_LOCATING)
   {
@@ -248,10 +244,7 @@ void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers)
       ROS_INFO("current map name:%s,station map name:%s",map_data_.map_name.c_str(),station.second.map_name.c_str());
       if(map_data_.map_name != station.second.map_name)
       {
-        movexbot_msgs::androidConsole slam_state_msg;
-        slam_state_msg.model.data = "localization_start";
-        slam_state_msg.name.data = station.second.map_name;
-        slam_state_pub_.publish(slam_state_msg);
+        StartLocalization(station.second.map_name);
         ros::Duration(2.0).sleep();
         return;
       }
@@ -272,11 +265,7 @@ void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers)
           geometry_msgs::Pose new_base_link_pose;
           tf::poseTFToMsg(new_base_link_to_map,new_base_link_pose);
           SetInitialPose(new_base_link_pose);
-
-          movexbot_msgs::androidConsole slam_state_msg;
-          slam_state_msg.model.data = "localization_success";
-          slam_state_msg.name.data = map_data_.map_name;
-          slam_state_pub_.publish(slam_state_msg);
+          SetLocalizationSucceed();
           ROS_INFO("have found tag station,location success.");
         }
       }
@@ -285,49 +274,6 @@ void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers)
   else
     dock_station_sub_.shutdown();
 }
-
-// void Manager::HandleStationTag(const geometry_msgs::PoseStamped &tag_pose) //TODO:to delete
-// {
-//   if(slam_state_ == SlamState::SLAM_STATE_LOCATING)
-//   {
-//     std::ifstream fin(FLAGS_map_folder_path + map_data_.map_name + "/ChargerStation/station.yaml");
-//     if (fin.is_open())
-//     {
-//       YAML::Node charger_station_yaml;
-//       charger_station_yaml = YAML::Load(fin);
-//       if (charger_station_yaml.IsNull())
-//         ROS_ERROR("station yaml is null!");
-//       else
-//       {
-//         tf::Transform tag_to_map;
-//         tag_to_map.getOrigin().setX(charger_station_yaml["gridX"].as<int>()*FLAGS_resolution);
-//         tag_to_map.getOrigin().setY(charger_station_yaml["gridY"].as<int>()*FLAGS_resolution);
-//         tag_to_map.setRotation(tf::createQuaternionFromYaw(charger_station_yaml["angle"].as<float>()));
-//         if(listener_.waitForTransform("/base_link", tag_pose.header.frame_id, tag_pose.header.stamp, ros::Duration(1.0)))
-//         {
-//           geometry_msgs::PoseStamped tag_pose_base_link;
-//           listener_.transformPose("/base_link",tag_pose,tag_pose_base_link);
-//           tf::StampedTransform tag_to_base_link;
-//           tag_to_base_link.getOrigin().setX(tag_pose_base_link.pose.position.x);
-//           tag_to_base_link.getOrigin().setY(tag_pose_base_link.pose.position.y);
-//           tag_to_base_link.setRotation(tf::createQuaternionFromYaw(tf::getYaw(tag_pose_base_link.pose.orientation)));
-//           tf::Transform new_base_link_to_map = tag_to_map * tag_to_base_link.inverse();
-//           geometry_msgs::Pose new_base_link_pose;
-//           tf::poseTFToMsg(new_base_link_to_map,new_base_link_pose);
-//           SetInitialPose(new_base_link_pose);
-//           movexbot_msgs::androidConsole slam_state_msg;
-//           slam_state_msg.model.data = "localization_success";
-//           slam_state_msg.name.data = map_data_.map_name;
-//           slam_state_pub_.publish(slam_state_msg);
-//           ROS_INFO("have found tag station,location success.");
-//         }
-//       }
-//     }
-//     else
-//       ROS_ERROR("no station yaml file!");
-//   }
-//   aruco_tag_sub_.shutdown();
-// }
 
 void Manager::MapPublishThread(Manager *manager)
 {
@@ -418,7 +364,7 @@ std::unique_ptr<nav_msgs::OccupancyGrid> Manager::GetOccupancyGridMap(float reso
   return CreateOccupancyGridMsg(painted_slices, resolution, node_options.map_frame, ros::Time::now());
 }
 
-void Manager::StartMapping(std::string map_name,uint32_t app_map_size_max)
+void Manager::StartMapping(std::string map_name)
 {
   ROS_INFO("start mapping!map_name:%s",map_name.c_str());
   if(node_)
@@ -428,7 +374,7 @@ void Manager::StartMapping(std::string map_name,uint32_t app_map_size_max)
     node_.reset();
     LOG(INFO) << "reset node done";
   }
-  map_data_.app_map_size_max = app_map_size_max * 10; //png compress will decrease data size tenfold
+  map_data_.app_map_size_max = 200000; //png compress will decrease data size tenfold
   auto map_builder = cartographer::mapping::CreateMapBuilder(node_options.map_builder_options);
   node_ = boost::shared_ptr<Node>(new Node(node_options, std::move(map_builder), tf_buffer_,FLAGS_collect_metrics));
   if(!map_name.empty() && boost::filesystem::exists(FLAGS_map_folder_path + map_name + "/" + map_name + ".pbstream")) //extend map
@@ -442,6 +388,13 @@ void Manager::StartMapping(std::string map_name,uint32_t app_map_size_max)
   node_->StartTrajectoryWithDefaultTopics(trajectory_options);
   robot_pose_sub_ = nh.subscribe("/tracked_pose",1, &Manager::HandleRobotPose,this);
   slam_state_ = SlamState::SLAM_STATE_MAPPING;
+  
+  movexbot_msgs::androidConsole slam_state_msg;
+  slam_state_msg.model.data = "mapping_start";
+  slam_state_msg.name.data = map_name;
+  slam_state_pub_.publish(slam_state_msg);
+
+  //TODO:start record rosbag (code is in navigation pkg now)
 }
 
 void Manager::CloseMapping(std::string map_name)
@@ -461,11 +414,22 @@ void Manager::CloseMapping(std::string map_name)
   LOG(INFO) << "reset node ...";
   node_.reset();
   LOG(INFO) << "reset node done";
+
+  
+  if(map_name.empty())
+  {
+    movexbot_msgs::androidConsole slam_state_msg;
+    slam_state_msg.model.data = "mapping_close";
+    slam_state_msg.name.data = map_name;
+    slam_state_pub_.publish(slam_state_msg);
+  }
+  else
+    StartLocalization(map_name);
 }
 
 void Manager::StartLocalization(std::string map_name)
 {
-  LOG(WARNING) << "start localization!map name:" << map_name;
+  LOG(INFO) << "start localization!map name:" << map_name;
   if(map_name.empty() || FLAGS_map_folder_path.empty())
     return;
   if(node_)
@@ -494,8 +458,23 @@ void Manager::StartLocalization(std::string map_name)
   if (FLAGS_start_trajectory_with_default_topics) {
     node_->StartTrajectoryWithDefaultTopics(trajectory_options_localization);
   }
-  // aruco_tag_sub_ = nh.subscribe("/aruco_single/pose",1,&Manager::HandleStationTag,this);
   dock_station_sub_ = nh.subscribe("/aruco_marker_publisher/markers",1,&Manager::HandleDockStation,this);
+  
+  movexbot_msgs::androidConsole slam_state_msg;
+  slam_state_msg.model.data = "localization_start";
+  slam_state_msg.name.data = map_name;
+  slam_state_pub_.publish(slam_state_msg);
+}
+
+void Manager::SetLocalizationSucceed(void)
+{
+  LOG(INFO) << "Set localization succeed";
+  slam_state_ = SlamState::SLAM_STATE_LOCATE_SUCCEED;
+
+  movexbot_msgs::androidConsole slam_state_msg;
+  slam_state_msg.model.data = "localization_success";
+  slam_state_msg.name.data = map_data_.map_name;
+  slam_state_pub_.publish(slam_state_msg);
 }
 
 void Manager::CloseLocalization(void)
@@ -516,7 +495,8 @@ void Manager::SetInitialPose(const geometry_msgs::Pose &initial_pose)
   if(!node_)
     return;
   LOG(INFO) << GetFormatString("initial_pose:(%f,%f,%f)",initial_pose.position.x,initial_pose.position.y,tf::getYaw(initial_pose.orientation));
-  slam_state_ = SlamState::SLAM_STATE_LOCATING;
+  if(slam_state_ == SlamState::SLAM_STATE_LOCATE_SUCCEED)
+    slam_state_ = SlamState::SLAM_STATE_LOCATING;
   node_->FinishLastTrajectory(); //TODO: delete the last trajectory to avoid memory increase
   TrajectoryOptions initial_pose_trajectory_options_localization = trajectory_options_localization;
 

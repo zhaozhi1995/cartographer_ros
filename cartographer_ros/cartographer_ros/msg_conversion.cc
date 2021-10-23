@@ -181,7 +181,7 @@ LaserScanToPointCloudWithIntensities(const LaserMessageType& msg) {
   }
 
   /********************** Adjust timestamp for point reverse ********************/
-#if 0
+#if 1
   std::vector<Eigen::Vector3f>points_temp;
   for (auto& point :point_cloud.points) {
     points_temp.push_back(point.position);
