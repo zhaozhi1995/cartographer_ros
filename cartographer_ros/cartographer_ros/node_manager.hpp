@@ -31,6 +31,7 @@
 #include <lib/Common.hpp>
 #include <movexbot_msgs/Relocalization.h>
 #include <movexbot_msgs/SetSlamCmd.h>
+#include <mutex>
 
 
 DEFINE_bool(collect_metrics, false,
@@ -68,6 +69,7 @@ using ::cartographer::io::SlamState;
 using ::cartographer::mapping::SubmapId;
 using ::cartographer::io::SubmapSlice;
 #define slam_state_ ::cartographer::io::slam_state
+#define MapNameFolderPath(map_name) FLAGS_map_folder_path + map_name + "/"
 
 class Manager
 {
@@ -91,13 +93,15 @@ private:
   ros::Publisher map_android_pub_,mapping_map_info_,robot_grid_pos_pub_,map_pub_,slam_state_pub_;
   ros::ServiceServer relocalization_service_,slam_cmd_service_;
   ros::NodeHandle nh;
+  geometry_msgs::PoseStamped robot_pose_;
   MapData_t map_data_;
   tf::TransformListener listener_;
   StationID dock_station_;
+  std::recursive_mutex node_mutex_;
 
   void StartMapping(std::string map_name);
   void CloseMapping(std::string map_name);
-  void StartLocalization(std::string map_name);
+  void StartLocalization(std::string map_name,geometry_msgs::Pose initial_pose = geometry_msgs::Pose());
   void CloseLocalization(void);
   void SetInitialPose(const geometry_msgs::Pose &pose);
   void SetLocalizationSucceed(void);
@@ -111,7 +115,7 @@ private:
   void MapPublish(void);
   bool RelocalizationService(movexbot_msgs::Relocalization::Request &req,movexbot_msgs::Relocalization::Response &res);
   bool SetSlamCmdService(movexbot_msgs::SetSlamCmd::Request &req,movexbot_msgs::SetSlamCmd::Response &res);
-  static void MapPublishThread(Manager *manager);
+  void MapPublishThread(void);
 public:
   Manager(tf2_ros::Buffer* tf_buffer)
   {
@@ -129,7 +133,7 @@ public:
     map_pub_ = nh.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
     relocalization_service_ = nh.advertiseService("slam/relocalization_service",&Manager::RelocalizationService,this);
     slam_cmd_service_ = nh.advertiseService("slam/set_cmd",&Manager::SetSlamCmdService,this);
-    std::thread map_publish_thread(MapPublishThread,this);
+    std::thread map_publish_thread(&Manager::MapPublishThread,this);
     map_publish_thread.detach();
   };
   ~Manager(){}
@@ -143,7 +147,7 @@ bool Manager::SetSlamCmdService(movexbot_msgs::SetSlamCmd::Request &req,movexbot
       {
         if(slam_state_ == SlamState::SLAM_STATE_MAPPING)
           CloseMapping(req.map_name);
-        else if(slam_state_ == SlamState::SLAM_STATE_LOCATING || slam_state_ == SlamState::SLAM_STATE_LOCATE_SUCCEED)
+        else if(slam_state_ == SlamState::SLAM_STATE_LOCATING || slam_state_ == SlamState::SLAM_STATE_RELOCATING || slam_state_ == SlamState::SLAM_STATE_LOCATE_SUCCEED)
           CloseLocalization();
       }
       break;
@@ -179,12 +183,12 @@ bool Manager::RelocalizationService(movexbot_msgs::Relocalization::Request &req,
   ros::Time start_time = ros::Time::now();
   while (ros::ok())
   {
-    if((ros::Time::now() - start_time).toSec() > 3)
+    if((ros::Time::now() - start_time).toSec() > 3.0)
       break;
     ros::spinOnce();
     loop.sleep();
   }
-  if(slam_state_ == SlamState::SLAM_STATE_LOCATING)
+  if(slam_state_ == SlamState::SLAM_STATE_LOCATING || slam_state_ == SlamState::SLAM_STATE_RELOCATING)
     SetLocalizationSucceed();
   res.state = res.STATE_SUCCESS;
   return true;
@@ -222,6 +226,7 @@ void Manager::HandleSlamState(const movexbot_msgs::androidConsole &msg)
 
 void Manager::HandleRobotPose(const geometry_msgs::PoseStamped &pose) //only for mapping mode
 {
+  robot_pose_ = pose;
   static movexbot_msgs::robotPos robot_grid_pose;
   robot_grid_pose.angle = tf::getYaw(pose.pose.orientation);
   robot_grid_pose.gridPosition.x = round(pose.pose.position.x / map_data_.app_map.resolution);
@@ -236,12 +241,13 @@ void Manager::HandleRobotPose(const geometry_msgs::PoseStamped &pose) //only for
 
 void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers) //TODO: consider move to navigation
 {
-  if(slam_state_ == SlamState::SLAM_STATE_LOCATING)
+  if(slam_state_ == SlamState::SLAM_STATE_LOCATING || slam_state_ == SlamState::SLAM_STATE_STANDBY)
   {
-    auto station = dock_station_.GetStation(markers.markers.front().id);
+    LOG(INFO) << "have found tag station,station id:" << markers.markers.front().id;
+    auto station = dock_station_.FindStation(markers.markers.front().id);
     if(station.first)
     {
-      ROS_INFO("current map name:%s,station map name:%s",map_data_.map_name.c_str(),station.second.map_name.c_str());
+      LOG(INFO) << GetFormatString("current map name:%s,station map name:%s",map_data_.map_name.c_str(),station.second.map_name.c_str());
       if(map_data_.map_name != station.second.map_name)
       {
         StartLocalization(station.second.map_name);
@@ -258,36 +264,47 @@ void Manager::HandleDockStation(const aruco_msgs::MarkerArray &markers) //TODO: 
           listener_.transformPose("/base_link",tag_pose,tag_pose);
           tag_pose.pose.position.z = 0;
           tag_pose.pose.orientation = tf::createQuaternionMsgFromYaw(tf::getYaw(tag_pose.pose.orientation));
-          tf::Transform tag_to_base_link,tag_to_map;
+          tf::Transform tag_to_base_link,tag_to_map(tf::createQuaternionFromYaw(station.second.pose.theta),tf::Vector3(station.second.pose.x,station.second.pose.y,0));
           tf::poseMsgToTF(tag_pose.pose,tag_to_base_link);
-          tf::poseMsgToTF(station.second.pose,tag_to_map);
+          // tf::poseMsgToTF(station.second,tag_to_map);
           tf::Transform new_base_link_to_map = tag_to_map * tag_to_base_link.inverse();
           geometry_msgs::Pose new_base_link_pose;
           tf::poseTFToMsg(new_base_link_to_map,new_base_link_pose);
           SetInitialPose(new_base_link_pose);
           SetLocalizationSucceed();
-          ROS_INFO("have found tag station,location success.");
         }
       }
     }
   }
   else
+  {
+    LOG(INFO) << "slam_state is not SLAM_STATE_LOCATING: " << slam_state_;
     dock_station_sub_.shutdown();
+  }
 }
 
-void Manager::MapPublishThread(Manager *manager)
+void Manager::MapPublishThread(void)
 {
   ros::Rate loop(1);
   while(ros::ok())
   {
     if(slam_state_ == SlamState::SLAM_STATE_MAPPING)
-      manager->MapPublish();
+      MapPublish();
     loop.sleep();
   }
 }
 
 void Manager::MapPublish(void)
 {
+  // boost::mutex::scoped_lock lock(node_mutex_, boost::try_to_lock);
+  // if(!lock)
+  //   return;
+  if (!node_mutex_.try_lock())
+  {
+    LOG(ERROR) << "try lock failed,return";
+    return;
+  }
+  std::lock_guard<std::recursive_mutex> lock(node_mutex_, std::adopt_lock);
   ros::Time start = ros::Time::now();
   std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(map_data_.mapping_resolution);
   if(map->data.empty())
@@ -366,10 +383,12 @@ std::unique_ptr<nav_msgs::OccupancyGrid> Manager::GetOccupancyGridMap(float reso
 
 void Manager::StartMapping(std::string map_name)
 {
-  ROS_INFO("start mapping!map_name:%s",map_name.c_str());
+  LOG(INFO) << "start mapping!map_name:" << map_name;
+  std::lock_guard<std::recursive_mutex> lock(node_mutex_);
   if(node_)
   {
     node_->FinishAllTrajectories();
+    node_->WaitFinishAllTrajectories();
     LOG(INFO) << "reset node ...";
     node_.reset();
     LOG(INFO) << "reset node done";
@@ -377,9 +396,9 @@ void Manager::StartMapping(std::string map_name)
   map_data_.app_map_size_max = 200000; //png compress will decrease data size tenfold
   auto map_builder = cartographer::mapping::CreateMapBuilder(node_options.map_builder_options);
   node_ = boost::shared_ptr<Node>(new Node(node_options, std::move(map_builder), tf_buffer_,FLAGS_collect_metrics));
-  if(!map_name.empty() && boost::filesystem::exists(FLAGS_map_folder_path + map_name + "/" + map_name + ".pbstream")) //extend map
+  if(!map_name.empty() && boost::filesystem::exists(MapNameFolderPath(map_name) + map_name + ".pbstream")) //extend map
   {
-    node_->LoadState(FLAGS_map_folder_path + map_name + "/" + map_name + ".pbstream",FLAGS_load_frozen_state);
+    node_->LoadState(MapNameFolderPath(map_name) + map_name + ".pbstream",FLAGS_load_frozen_state);
     std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(FLAGS_resolution);
     map_data_.mapping_resolution = sqrt((float)map->data.size() / map_data_.app_map_size_max) * FLAGS_resolution;
   }
@@ -393,7 +412,7 @@ void Manager::StartMapping(std::string map_name)
   slam_state_msg.model.data = "mapping_start";
   slam_state_msg.name.data = map_name;
   slam_state_pub_.publish(slam_state_msg);
-
+  LOG(INFO) << "start mapping end";
   //TODO:start record rosbag (code is in navigation pkg now)
 }
 
@@ -404,7 +423,10 @@ void Manager::CloseMapping(std::string map_name)
     return;
   slam_state_ = SlamState::SLAM_STATE_STANDBY;
   robot_pose_sub_.shutdown();
+  std::lock_guard<std::recursive_mutex> lock(node_mutex_);
+  LOG(WARNING) << "lock out";
   node_->FinishAllTrajectories();
+  node_->WaitFinishAllTrajectories();
 
   if (!map_name.empty() && !FLAGS_map_folder_path.empty()) 
   {
@@ -418,28 +440,36 @@ void Manager::CloseMapping(std::string map_name)
   
   if(map_name.empty())
   {
-    movexbot_msgs::androidConsole slam_state_msg;
-    slam_state_msg.model.data = "mapping_close";
-    slam_state_msg.name.data = map_name;
-    slam_state_pub_.publish(slam_state_msg);
+    // movexbot_msgs::androidConsole slam_state_msg;
+    // slam_state_msg.model.data = "mapping_close";
+    // slam_state_msg.name.data = map_name;
+    // slam_state_pub_.publish(slam_state_msg);
+    // ros::Duration(1.0).sleep(); //TODO:为了等待上传到app的信号改变，后续优化涉及到和navigation中的slam状态同步问题
+    StartLocalization(map_data_.map_name);
   }
   else
-    StartLocalization(map_name);
+  {
+    StartLocalization(map_name,robot_pose_.pose);
+    SetLocalizationSucceed();
+  }
 }
 
-void Manager::StartLocalization(std::string map_name)
+void Manager::StartLocalization(std::string map_name,geometry_msgs::Pose initial_pose)
 {
   LOG(INFO) << "start localization!map name:" << map_name;
+  std::lock_guard<std::recursive_mutex> lock(node_mutex_);
+  LOG(WARNING) << "lock out";
   if(map_name.empty() || FLAGS_map_folder_path.empty())
     return;
   if(node_)
   {
     node_->FinishAllTrajectories();
+    node_->WaitFinishAllTrajectories();
     LOG(INFO) << "reset node ...";
     node_.reset();
     LOG(INFO) << "reset node done";
   }
-  if(!boost::filesystem::exists(FLAGS_map_folder_path + map_name + "/" + map_name + ".pbstream"))
+  if(!boost::filesystem::exists(MapNameFolderPath(map_name) + map_name + ".pbstream"))
   {
     ROS_ERROR("the pbstream file is not exist,return!");
     return;
@@ -450,12 +480,20 @@ void Manager::StartLocalization(std::string map_name)
   auto map_builder = cartographer::mapping::CreateMapBuilder(node_options.map_builder_options);
   node_ = boost::shared_ptr<Node>(new Node(node_options, std::move(map_builder), tf_buffer_,
             FLAGS_collect_metrics));
-  node_->LoadState(FLAGS_map_folder_path + map_name + "/" + map_name + ".pbstream",
+  node_->LoadState(MapNameFolderPath(map_name) + map_name + ".pbstream",
                   FLAGS_load_frozen_state);
   std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(FLAGS_resolution);
   map_data_.map_info = map->info;
   map_pub_.publish(*map);
   if (FLAGS_start_trajectory_with_default_topics) {
+    const auto pose = ToRigid3d(initial_pose);
+    if (pose.IsValid()) {
+      ::cartographer::mapping::proto::InitialTrajectoryPose initial_trajectory_pose;
+      initial_trajectory_pose.set_to_trajectory_id(0);
+      *initial_trajectory_pose.mutable_relative_pose() = cartographer::transform::ToProto(pose);
+      initial_trajectory_pose.set_timestamp(cartographer::common::ToUniversal(::cartographer_ros::FromRos(ros::Time(0))));
+      *trajectory_options_localization.trajectory_builder_options.mutable_initial_trajectory_pose() = initial_trajectory_pose;
+    }
     node_->StartTrajectoryWithDefaultTopics(trajectory_options_localization);
   }
   dock_station_sub_ = nh.subscribe("/aruco_marker_publisher/markers",1,&Manager::HandleDockStation,this);
@@ -464,6 +502,7 @@ void Manager::StartLocalization(std::string map_name)
   slam_state_msg.model.data = "localization_start";
   slam_state_msg.name.data = map_name;
   slam_state_pub_.publish(slam_state_msg);
+  ros::Duration(1.0).sleep(); //TODO:为了等待上传到app的信号改变，后续优化涉及到和navigation中的slam状态同步问题
 }
 
 void Manager::SetLocalizationSucceed(void)
@@ -479,10 +518,13 @@ void Manager::SetLocalizationSucceed(void)
 
 void Manager::CloseLocalization(void)
 {
-  ROS_INFO("close localization!");
+  LOG(INFO) << "close localization!";
+  std::lock_guard<std::recursive_mutex> lock(node_mutex_);
+  LOG(WARNING) << "lock out";
   if(node_)
   {
     node_->FinishAllTrajectories();
+    node_->WaitFinishAllTrajectories();
     LOG(INFO) << "reset node ...";
     node_.reset();
     LOG(INFO) << "reset node done";
@@ -495,8 +537,8 @@ void Manager::SetInitialPose(const geometry_msgs::Pose &initial_pose)
   if(!node_)
     return;
   LOG(INFO) << GetFormatString("initial_pose:(%f,%f,%f)",initial_pose.position.x,initial_pose.position.y,tf::getYaw(initial_pose.orientation));
-  if(slam_state_ == SlamState::SLAM_STATE_LOCATE_SUCCEED)
-    slam_state_ = SlamState::SLAM_STATE_LOCATING;
+  if(slam_state_ == SlamState::SLAM_STATE_LOCATE_SUCCEED || slam_state_ == SlamState::SLAM_STATE_LOCATING)
+    slam_state_ = SlamState::SLAM_STATE_RELOCATING;
   node_->FinishLastTrajectory(); //TODO: delete the last trajectory to avoid memory increase
   TrajectoryOptions initial_pose_trajectory_options_localization = trajectory_options_localization;
 
@@ -515,13 +557,77 @@ void Manager::SetInitialPose(const geometry_msgs::Pose &initial_pose)
   node_->StartTrajectoryWithDefaultTopics(initial_pose_trajectory_options_localization);
 }
 
+void UpdataVirtualWallPointCoor(const std::string &map_name, const Coordinate_t &png_coordinate_add)
+{
+  std::string virtualwall_folder_path = MapNameFolderPath(map_name) + "VirtualWall/";
+  vector<std::string> virtualwall_file_names = GetFileNameListInFolder(virtualwall_folder_path,".json");
+  for(auto &file_name:virtualwall_file_names)
+  {
+    nlohmann::json json;
+    std::ifstream(virtualwall_folder_path + file_name) >> json;
+    for(auto &path:json["pathList"])
+    {
+      path["gridPositions"][0]["x"] = path["gridPositions"][0]["x"].get<int>() + png_coordinate_add.x;
+      path["gridPositions"][0]["y"] = path["gridPositions"][0]["y"].get<int>() + png_coordinate_add.y;
+      path["gridPositions"][1]["x"] = path["gridPositions"][1]["x"].get<int>() + png_coordinate_add.x;
+      path["gridPositions"][1]["y"] = path["gridPositions"][1]["y"].get<int>() + png_coordinate_add.y;
+    }
+    std::ofstream file(virtualwall_folder_path + file_name);
+    if(!file.is_open())
+    {
+      LOG(ERROR) << "Open file failed";
+      continue;
+    }
+    file << json.dump(2);
+  }
+}
+
+void UpdataTaskPointCoor(const std::string &map_name, const Coordinate_t &png_coordinate_add)
+{
+  std::string task_folder_path = MapNameFolderPath(map_name) + "Task/";
+  vector<std::string> task_file_names = GetFileNameListInFolder(task_folder_path,".json");
+  for(auto &file_name:task_file_names)
+  {
+    nlohmann::json json;
+    std::ifstream(task_folder_path + file_name) >> json;
+    for(auto &task:json)
+    {
+      for(auto &pose:task["pose_list"])
+      {
+        pose["x"] = pose["x"].get<int>() + png_coordinate_add.x;
+        pose["y"] = pose["y"].get<int>() + png_coordinate_add.y;
+      }
+      for(auto &arc_segment:task["arc_segment_list"])
+      {
+        arc_segment["start_pose"]["x"] = arc_segment["start_pose"]["x"].get<int>() + png_coordinate_add.x;
+        arc_segment["start_pose"]["y"] = arc_segment["start_pose"]["y"].get<int>() + png_coordinate_add.y;
+        arc_segment["end_pose"]["x"] = arc_segment["end_pose"]["x"].get<int>() + png_coordinate_add.x;
+        arc_segment["end_pose"]["y"] = arc_segment["end_pose"]["y"].get<int>() + png_coordinate_add.y;
+      }
+    }
+    std::ofstream file(task_folder_path + file_name);
+    if(!file.is_open())
+    {
+      LOG(ERROR) << "Open file failed";
+      continue;
+    }
+    file << json.dump(2);
+  }
+}
+
 void Manager::SaveMap(std::string map_name)
 {
-  std::string map_name_folder_path = FLAGS_map_folder_path + map_name;
+  bool is_new_map;
+  std::string map_name_folder_path = MapNameFolderPath(map_name);
   ROS_INFO("map_name_folder_path:%s",map_name_folder_path.c_str());
   if(access(map_name_folder_path.c_str(),0) != 0)
+  {
+    is_new_map = true;
     mkdir(map_name_folder_path.c_str(),S_IRWXU | S_IRWXG | S_IRWXO);
-  node_->SerializeState(map_name_folder_path + "/" + map_name + ".pbstream",true /* include_unfinished_submaps */);
+  }
+  else
+    is_new_map = false;
+  node_->SerializeState(map_name_folder_path + map_name + ".pbstream",true /* include_unfinished_submaps */);
   
   /*******************save png****************/
   std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(FLAGS_resolution);
@@ -529,19 +635,43 @@ void Manager::SaveMap(std::string map_name)
   std::vector<int> compression_params;
   compression_params.push_back(cv::IMWRITE_PNG_COMPRESSION);
   compression_params.push_back(9);
-  if(!cv::imwrite(map_name_folder_path + "/" + map_name + ".png", colorMat, compression_params))
+  if(!cv::imwrite(map_name_folder_path + map_name + ".png", colorMat, compression_params))
   {
-    LOG(ERROR) << "save map.png error:" << map_name_folder_path + "/" + map_name;
+    LOG(ERROR) << "save map.png error:" << map_name_folder_path + map_name;
     return;
   }
-  cv::imwrite(map_name_folder_path + "/" + map_name + "_temp.png", colorMat, compression_params);
+  cv::imwrite(map_name_folder_path + map_name + "_temp.png", colorMat, compression_params);
+
+  //rewrite coordinate of all map data if zero point of png is changed
+  if(!is_new_map)
+  {
+    LOG(INFO) << "Update map data...";
+    MapInfo_t map_info = GetMapInfoFromYaml(map_name_folder_path  + map_name + ".yaml");
+    Coordinate_t coordinate_of_zero_point_in_map = MatToMap(Coordinate_t(0,0),map_info);
+
+    MapInfo_t new_map_info = MapMetaDataToMapInfo(map->info);
+    Coordinate_t new_coordinate_of_zero_point_in_map = MatToMap(Coordinate_t(0,0),new_map_info);
+
+    if(new_coordinate_of_zero_point_in_map != coordinate_of_zero_point_in_map)
+    {
+      Coordinate_t png_coordinate_add;
+      png_coordinate_add.x = abs(new_coordinate_of_zero_point_in_map.x - coordinate_of_zero_point_in_map.x);
+      png_coordinate_add.y = abs(new_coordinate_of_zero_point_in_map.y - coordinate_of_zero_point_in_map.y);
+      LOG(INFO) << png_coordinate_add;
+
+      UpdataVirtualWallPointCoor(map_name,png_coordinate_add);
+      UpdataTaskPointCoor(map_name,png_coordinate_add);
+    }
+    LOG(INFO) << "Update map data done";
+  }
 
   /*******************save yaml****************/
-  FILE *yaml = fopen((map_name_folder_path + "/" + map_name + ".yaml").c_str(), "w");
+  FILE *yaml = fopen((map_name_folder_path + map_name + ".yaml").c_str(), "w");
   fprintf(yaml, "image: %s\nresolution: %f\nwidth: %d\nheight: %d\norigin: [%f, %f, %f]\nnegate: 0\n\n",
           (map_name + ".png").c_str(), map->info.resolution, map->info.width, map->info.height,
           map->info.origin.position.x, map->info.origin.position.y, tf::getYaw(map->info.origin.orientation));
   fclose(yaml);
+
   ROS_INFO("map saved done!");
 }
 

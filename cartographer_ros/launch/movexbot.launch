@@ -22,7 +22,7 @@
           -configuration_basename mapping.lua
           -configuration_basename_localization localization.lua
           -use_manager=true"
-      output="screen">
+      output="screen" respawn="true">
     <remap from="scan" to="nav_scan" />
     <remap from="scan_1" to="nav_scan" />
     <remap from="scan_2" to="camera_3_scan" />

@@ -97,7 +97,7 @@ void InitGoogleLog(std::string node_name)
   google::InitGoogleLogging(node_name.c_str()); //链接文件名
   google::SetGoogleLogPath(log_path);  //判断当前路径下文件夹是否存在
   google::InstallFailureSignalHandler();
-  google::SetStderrLogging(google::WARNING);
+  google::SetStderrLogging(google::ERROR);
   FLAGS_colorlogtostderr = true; //设置输出到屏幕的日志显示相应颜色
    
   FLAGS_servitysinglelog = false;// 用来按照等级区分log文件

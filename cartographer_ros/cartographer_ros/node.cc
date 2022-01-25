@@ -161,6 +161,39 @@ Node::~Node() { FinishAllTrajectories(); }
 
 ::ros::NodeHandle* Node::node_handle() { return &node_handle_; }
 
+//add by zz
+void Node::WaitFinishAllTrajectories() {
+  LOG(INFO) << "wait for finish all trajectory...";
+  ros::WallTime start_time = ros::WallTime::now();
+  while(ros::ok())
+  {
+    bool flag_all_finished = true;
+    for (const auto& entry : map_builder_bridge_.GetTrajectoryStates()) {
+      const int trajectory_id = entry.first;
+      if (entry.second == TrajectoryState::ACTIVE) {
+        flag_all_finished = false;
+        break;
+      }
+    }
+    if(flag_all_finished)
+    {
+      LOG(ERROR) << "All trajectories finished";
+      break;
+    }
+    else
+    {
+      LOG(WARNING) << "trajectories are not all finished";
+      ros::WallDuration(0.5).sleep();
+    }
+    if((ros::WallTime::now() - start_time).toSec() > 5.0)
+    {
+      LOG(ERROR) << "wait for finish all trajectory more than 5s, break";
+      break;
+    }
+  }
+}
+//end
+
 bool Node::HandleSubmapQuery(
     ::cartographer_ros_msgs::SubmapQuery::Request& request,
     ::cartographer_ros_msgs::SubmapQuery::Response& response) {

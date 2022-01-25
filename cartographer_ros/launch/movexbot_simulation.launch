@@ -18,7 +18,7 @@
   <param name="/use_sim_time" value="true" />
   <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/test.bag"/> -->
   <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/5f.bag"/> -->
-  <arg name="bag_filename" default="/home/movexbot/temp/bag/wj/map_ssssa_2021-10-20-17-48-38.bag"/>
+  <arg name="bag_filename" default="/home/movexbot/rosbag_test/Mapping_error_2022-01-21-20-46-48.bag"/>
   
   <!-- <param name="robot_description"
     textfile="$(find cartographer_ros)/urdf/demo.urdf" />

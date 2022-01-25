@@ -69,6 +69,8 @@ class Node {
   {
     return &map_builder_bridge_;
   }
+  void WaitFinishAllTrajectories();
+  //end
 
   bool FinishLastTrajectory();
 
