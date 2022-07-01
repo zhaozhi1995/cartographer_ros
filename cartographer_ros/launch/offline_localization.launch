@@ -18,10 +18,10 @@
   <param name="/use_sim_time" value="true" />
   <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/cartographer/b3-2016-04-05-14-14-00.bag"/> -->
   <!-- <arg name="load_state_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/cartographer/b3-2016-04-05-13-54-42.bag.pbstream"/> -->
-  <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/2020-11-16-17-35-11-no_tf.bag"/>
-  <arg name="load_state_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/2020-11-16-17-35-11-no_tf.bag.pbstream"/>
+  <arg name="bag_filename" default="/home/movexbot/rosbag_test/Mapping/Mapping_NSPlaza060822_2022-06-08-15-48-31.bag"/>
+  <arg name="load_state_filename" default="/home/movexbot/rosbag_test/Mapping/Mapping_NSPlaza060822_2022-06-08-15-48-31.bag.pbstream"/>
   <param name="robot_description"
-    textfile="$(find cartographer_ros)/urdf/eva.urdf" />
+    textfile="$(find cartographer_ros)/urdf/demo.urdf" />
 
   <node name="robot_state_publisher" pkg="robot_state_publisher"
     type="robot_state_publisher" />
@@ -29,8 +29,10 @@
   <node name="cartographer_node" pkg="cartographer_ros"
       type="cartographer_node" args="
           -configuration_directory $(find cartographer_ros)/configuration_files
-          -configuration_basename backpack_2d_localization.lua
-          -load_state_filename $(arg load_state_filename)"
+          -configuration_basename mapping.lua
+          -configuration_basename_localization localization.lua
+          -load_state_filename $(arg load_state_filename)
+          -use_manager=false"
       output="screen">
     <remap from="/scan" to="/nav_scan"/>
     <remap from="echoes" to="horizontal_laser_2d" />
@@ -43,5 +45,5 @@
   <node name="rviz" pkg="rviz" type="rviz" required="true"
       args="-d $(find cartographer_ros)/configuration_files/demo_2d.rviz" />
   <node name="playbag" pkg="rosbag" type="play"
-      args="--clock -s 250 $(arg bag_filename)" />
+      args="--clock -r 4 -s 0 $(arg bag_filename)" />
 </launch>

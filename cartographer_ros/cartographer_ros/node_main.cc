@@ -136,7 +136,11 @@ int main(int argc, char** argv) {
     tf2_ros::Buffer tf_buffer{::ros::Duration(kTfBufferCacheTimeInSeconds)};
     tf2_ros::TransformListener tf(tf_buffer);
     cartographer_ros::Manager manager(&tf_buffer);
-    ::ros::spin();
+    // ros::AsyncSpinner spinner(4);
+    // spinner.start();
+    // while (ros::ok())
+    //   ros::Duration(1).sleep();
+    ros::spin();
   }
   else
     cartographer_ros::Run();
