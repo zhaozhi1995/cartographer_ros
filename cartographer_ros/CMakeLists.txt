@@ -36,6 +36,7 @@ set(PACKAGE_DEPENDENCIES
   movexbot_msgs
   aruco_msgs
   navigation
+  lidar_localizer
 )
 
 if(WIN32)

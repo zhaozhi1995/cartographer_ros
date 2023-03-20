@@ -55,11 +55,11 @@ TRAJECTORY_BUILDER_2D = {
 
   motion_filter = {
     max_time_seconds = 5.,
-    max_time_seconds_locating = 0.1,
+    max_time_seconds_locating = 1.0,
     max_time_seconds_relocating = 0.02,
     max_time_seconds_locate_succeed = 999999999,
     max_distance_meters = 0.2,
-    max_angle_radians = math.rad(1.),
+    max_angle_radians = math.rad(2.),
   },
 
   -- TODO(schwoere,wohe): Remove this constant. This is only kept for ROS.

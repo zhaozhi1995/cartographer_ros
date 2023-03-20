@@ -44,6 +44,8 @@
 //               "If non-empty, serialize state and write it to disk before shutting down.");
 DEFINE_bool(use_manager, true,
             "whether or not use manager for cartographer node");
+DEFINE_int32(slam_state_initial, 0,
+              "slam state initial");
 
 namespace cartographer_ros {
 namespace {
@@ -136,14 +138,19 @@ int main(int argc, char** argv) {
     tf2_ros::Buffer tf_buffer{::ros::Duration(kTfBufferCacheTimeInSeconds)};
     tf2_ros::TransformListener tf(tf_buffer);
     cartographer_ros::Manager manager(&tf_buffer);
-    // ros::AsyncSpinner spinner(4);
-    // spinner.start();
-    // while (ros::ok())
-    //   ros::Duration(1).sleep();
+#if 0
+    ros::AsyncSpinner spinner(2);
+    spinner.start();
+    ros::waitForShutdown();
+#else
     ros::spin();
+#endif
   }
   else
+  {
+    ::cartographer::io::slam_state = (::cartographer::io::SlamState)FLAGS_slam_state_initial;
     cartographer_ros::Run();
+  }
 
   ::ros::shutdown();
 }

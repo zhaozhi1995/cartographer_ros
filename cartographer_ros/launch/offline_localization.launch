@@ -18,8 +18,8 @@
   <param name="/use_sim_time" value="true" />
   <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/cartographer/b3-2016-04-05-14-14-00.bag"/> -->
   <!-- <arg name="load_state_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/cartographer/b3-2016-04-05-13-54-42.bag.pbstream"/> -->
-  <arg name="bag_filename" default="/home/movexbot/rosbag_test/Mapping/Mapping_NSPlaza060822_2022-06-08-15-48-31.bag"/>
-  <arg name="load_state_filename" default="/home/movexbot/rosbag_test/Mapping/Mapping_NSPlaza060822_2022-06-08-15-48-31.bag.pbstream"/>
+  <arg name="bag_filename" default="/home/movexbot/rosbag_test/Task/B10/大堂_1__2022-11-11-17-20-19_no_tf.bag"/>
+  <arg name="load_state_filename" default="/home/movexbot/MoveXBot/Map/大堂/大堂.pbstream"/>
   <param name="robot_description"
     textfile="$(find cartographer_ros)/urdf/demo.urdf" />
 
@@ -29,9 +29,9 @@
   <node name="cartographer_node" pkg="cartographer_ros"
       type="cartographer_node" args="
           -configuration_directory $(find cartographer_ros)/configuration_files
-          -configuration_basename mapping.lua
-          -configuration_basename_localization localization.lua
+          -configuration_basename localization.lua
           -load_state_filename $(arg load_state_filename)
+          -slam_state_initial=3
           -use_manager=false"
       output="screen">
     <remap from="/scan" to="/nav_scan"/>
@@ -45,5 +45,5 @@
   <node name="rviz" pkg="rviz" type="rviz" required="true"
       args="-d $(find cartographer_ros)/configuration_files/demo_2d.rviz" />
   <node name="playbag" pkg="rosbag" type="play"
-      args="--clock -r 4 -s 0 $(arg bag_filename)" />
+      args="--clock -r 1 -s 0 $(arg bag_filename)" />
 </launch>

@@ -181,15 +181,20 @@ LaserScanToPointCloudWithIntensities(const LaserMessageType& msg) {
   }
 
   /********************** Adjust timestamp for point reverse ********************/
-#if 0
-  std::vector<Eigen::Vector3f>points_temp;
-  for (auto& point :point_cloud.points) {
-    points_temp.push_back(point.position);
-  }
-  int index = 0;
-  for (auto& point :point_cloud.points) {
-    point.position =  points_temp[point_cloud.points.size()-1-index];
-    index++;
+#if 1
+  static std::string robot_id = getenv("ROBOT_ID");
+  if(robot_id == "MX-SC60A-2112003" || robot_id == "M-SC60A-2211001" || robot_id == "M-SC60A-2211002")
+  {
+    LOG_FIRST_N(ERROR,1) << "Adjust timestamp for point reverse";
+    std::vector<Eigen::Vector3f>points_temp;
+    for (auto& point :point_cloud.points) {
+      points_temp.push_back(point.position);
+    }
+    int index = 0;
+    for (auto& point :point_cloud.points) {
+      point.position =  points_temp[point_cloud.points.size()-1-index];
+      index++;
+    }
   }
 #endif
   /********************** end *********************/

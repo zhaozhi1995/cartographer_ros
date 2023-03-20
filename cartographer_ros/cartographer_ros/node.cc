@@ -349,11 +349,16 @@ void Node::PublishLocalTrajectoryData(const ::ros::TimerEvent& timer_event) {
         }
       }
       if (node_options_.publish_tracked_pose) {
+        static ros::Time last_time = ros::Time::now();
         ::geometry_msgs::PoseStamped pose_msg;
         pose_msg.header.frame_id = node_options_.map_frame;
         pose_msg.header.stamp = stamped_transform.header.stamp;
         pose_msg.pose = ToGeometryMsgPose(tracking_to_map);
         tracked_pose_publisher_.publish(pose_msg);
+
+        if(ros::Time::now() - last_time > ros::Duration(0.5))
+          LOG(ERROR) << "tracked_pose_publisher_ pub over time: " << (ros::Time::now() - last_time).toSec();
+        last_time = ros::Time::now();
       }
     }
   }
@@ -563,7 +568,7 @@ cartographer_ros_msgs::StatusResponse Node::FinishTrajectoryUnderLock(
     LOG(INFO) << status_response.message;
     return status_response;
   }
-
+//LOG(ERROR) << "test";
   // First, check if we can actually finish the trajectory.
   status_response = TrajectoryStateToStatus(
       trajectory_id, {TrajectoryState::ACTIVE} /* valid states */);
@@ -571,18 +576,24 @@ cartographer_ros_msgs::StatusResponse Node::FinishTrajectoryUnderLock(
     LOG(ERROR) << "Can't finish trajectory: " << status_response.message;
     return status_response;
   }
-
+//LOG(ERROR) << "test";
   // Shutdown the subscribers of this trajectory.
   // A valid case with no subscribers is e.g. if we just visualize states.
   if (subscribers_.count(trajectory_id)) {
     for (auto& entry : subscribers_[trajectory_id]) {
+      LOG(ERROR) << "test: " << entry.topic;
       entry.subscriber.shutdown();
+      //LOG(ERROR) << "test";
       subscribed_topics_.erase(entry.topic);
       LOG(INFO) << "Shutdown the subscriber of [" << entry.topic << "]";
     }
+    //LOG(ERROR) << "test";
     CHECK_EQ(subscribers_.erase(trajectory_id), 1);
+    //LOG(ERROR) << "test";
   }
+  //LOG(ERROR) << "test";
   map_builder_bridge_.FinishTrajectory(trajectory_id);
+  //LOG(ERROR) << "test";
   trajectories_scheduled_for_finish_.emplace(trajectory_id);
   status_response.message =
       absl::StrCat("Finished trajectory ", trajectory_id, ".");
@@ -759,14 +770,20 @@ bool Node::HandleReadMetrics(
 }
 
 void Node::FinishAllTrajectories() {
+  //LOG(ERROR) << "test";
   absl::MutexLock lock(&mutex_);
+  //LOG(ERROR) << "test";
   for (const auto& entry : map_builder_bridge_.GetTrajectoryStates()) {
+    LOG(ERROR) << "test: " << entry.first;
     if (entry.second == TrajectoryState::ACTIVE) {
+      //LOG(ERROR) << "test";
       const int trajectory_id = entry.first;
       CHECK_EQ(FinishTrajectoryUnderLock(trajectory_id).code,
                cartographer_ros_msgs::StatusCode::OK);
     }
+    //LOG(ERROR) << "test";
   }
+  //LOG(ERROR) << "test";
 }
 
 bool Node::FinishTrajectory(const int trajectory_id) {

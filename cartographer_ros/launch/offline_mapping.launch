@@ -16,12 +16,14 @@
 
 <launch>
   <!-- <arg name="bag_filenames" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/cartographer/b3-2016-04-05-13-54-42.bag"/> -->
-  <arg name="bag_filenames" default="/home/movexbot/rosbag_test/Mapping/Mapping_NSPlaza060822_2022-06-08-15-48-31.bag"/>
+  <arg name="bag_filenames" default="/home/movexbot/rosbag_test/Mapping/Mapping_ssss_2022-08-01-15-03-10.bag"/>
   <arg name="no_rviz" default="false"/>
   <arg name="rviz_config" default="$(find cartographer_ros)/configuration_files/demo_2d.rviz"/>
   <arg name="configuration_directory" default="$(find cartographer_ros)/configuration_files"/>
   <arg name="configuration_basenames" default="mapping.lua"/>
+  <arg name="load_state_filename" default=""/>
   <arg name="urdf_filenames" default="$(find cartographer_ros)/urdf/demo.urdf"/>
+
   <arg name="launch_prefix" default=""/>
 
   <remap from="/scan" to="/nav_scan"/>
@@ -35,5 +37,6 @@
     <arg name="configuration_basenames" value="$(arg configuration_basenames)"/>
     <arg name="urdf_filenames" value="$(arg urdf_filenames)"/>
     <arg name="launch_prefix" value="$(arg launch_prefix)"/>
+    <arg name="load_state_filename" value="$(arg load_state_filename)"/>
   </include>
 </launch>

@@ -66,6 +66,7 @@
   <depend>movexbot_msgs</depend>
   <depend>aruco_msgs</depend>
   <depend>navigation</depend>
+  <depend>lidar_localizer</depend>
 
   <test_depend>rosunit</test_depend>
 
