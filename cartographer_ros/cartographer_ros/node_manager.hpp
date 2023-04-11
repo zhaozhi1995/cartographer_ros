@@ -74,8 +74,8 @@ using TrajectoryState = ::cartographer::mapping::PoseGraphInterface::TrajectoryS
 using ::cartographer::io::SlamState;
 using ::cartographer::mapping::SubmapId;
 using ::cartographer::io::SubmapSlice;
+//TODO: 和上传的slam状态同步
 #define slam_state_ ::cartographer::io::slam_state
-#define flag_lost_location_ ::cartographer::io::flag_lost_location
 #define MapNameFolderPath(map_name) FLAGS_map_folder_path + map_name + "/"
 
 class Manager
@@ -115,6 +115,7 @@ private:
   void CloseLocalization(void);
   void SetInitialPose(const geometry_msgs::Pose &pose);
   void SetLocalizationSucceed(void);
+  void SetLocalizationWeak(void);
   void CancelLocalizationSucceed(void);
   void LocalizationLost(void);
   void SaveMap(std::string map_name);
@@ -481,33 +482,56 @@ void Manager::HandleRobotPose(const geometry_msgs::PoseStamped &pose)
     robot_grid_pose.mapInfo.resolution = map_data_.app_map.resolution;
     robot_grid_pos_pub_.publish(robot_grid_pose);
   }
-  else  */if(slam_state_ == SlamState::SLAM_STATE_LOCATE_SUCCEED && flag_lost_location_)
+  else  */if(slam_state_ == SlamState::SLAM_STATE_LOCATE_SUCCEED)
   {
-    LOG(INFO) << "lost location when runing,check location around the current pose: " << pose;
-    lidar_localizer::LocalizerPostion lidar_localizer_srv;
-    lidar_localizer_srv.request.is_global = false;
-    lidar_localizer_srv.request.linear_search_window = 0.5; //m
-    lidar_localizer_srv.request.angular_search_window = 0.52; //30 degree
-    lidar_localizer_srv.request.init_pose = pose;
-    lidar_localizer_srv.request.min_score = 0.55;
-    if(lidar_localizer_client_.call(lidar_localizer_srv))
+    static int last_check_node_count = 0;
+    if(cartographer::io::invalid_node_count > 100)
     {
-      if(lidar_localizer_srv.response.pose_found)
+      if(!last_check_node_count)
+        SetLocalizationWeak();
+      if(cartographer::io::invalid_node_count - last_check_node_count > 20)
       {
-        LOG(INFO) << "found lidar relocate pose: " << lidar_localizer_srv.response.pose.pose << ",score: " << lidar_localizer_srv.response.score;
-        // SetInitialPose(lidar_localizer_srv.response.pose.pose);
-        flag_lost_location_ = false;
-        return;
+        last_check_node_count = cartographer::io::invalid_node_count;
+        LOG(INFO) << "lost location when runing,check location around the current pose: " << pose;
+        lidar_localizer::LocalizerPostion lidar_localizer_srv;
+        lidar_localizer_srv.request.is_global = false;
+        lidar_localizer_srv.request.linear_search_window = 1.0; //m
+        lidar_localizer_srv.request.angular_search_window = 0.52; //30 degree
+        lidar_localizer_srv.request.init_pose = pose;
+        lidar_localizer_srv.request.min_score = 0.55;
+        if(lidar_localizer_client_.call(lidar_localizer_srv))
+        {
+          if(lidar_localizer_srv.response.pose_found)
+          {
+            LOG(INFO) << "found lidar relocate pose: " << lidar_localizer_srv.response.pose.pose << ",score: " << lidar_localizer_srv.response.score;
+            if(FLAGS_is_check_location_lost)
+            {
+              Position_t current_pos(pose.pose.position.x,pose.pose.position.y,tf::getYaw(pose.pose.orientation));
+              Position_t calculate_pos(lidar_localizer_srv.response.pose.pose.position.x,lidar_localizer_srv.response.pose.pose.position.y,tf::getYaw(lidar_localizer_srv.response.pose.pose.orientation));
+              double distance_diff = DistanceToDest(current_pos,calculate_pos);
+              double orientation_diff = OrientationDiff(current_pos.orientation,calculate_pos.orientation);
+              LOG(INFO) << "distance diif: " << distance_diff << ",orientation_diff: " << orientation_diff;
+              if(FLAGS_is_check_location_lost && (distance_diff > 0.2 || orientation_diff > 0.35))
+              {
+                CancelLocalizationSucceed();
+                SetInitialPose(lidar_localizer_srv.response.pose.pose);
+                SetLocalizationSucceed();
+              }
+            }
+            return;
+          }
+          else
+            LOG(INFO) << "relocalization around the current pose failed";
+        }
+        else
+          LOG(ERROR) << "lidar_localizer_srv error";
       }
-      else
-        LOG(INFO) << "relocalization around the current pose failed";
     }
-    else
-      LOG(ERROR) << "lidar_localizer_srv error";
-
-    flag_lost_location_ = false;
-    if(FLAGS_is_check_location_lost)
-      LocalizationLost();
+    else if(last_check_node_count)
+    {
+      last_check_node_count = 0;
+      SetLocalizationSucceed();
+    }
   }
 }
 
@@ -770,6 +794,18 @@ void Manager::SetLocalizationSucceed(void)
 
   movexbot_msgs::androidConsole slam_state_msg;
   slam_state_msg.model.data = "localization_success";
+  slam_state_msg.name.data = map_data_.map_name;
+  slam_state_pub_.publish(slam_state_msg);
+  dock_station_sub_.shutdown();
+}
+
+void Manager::SetLocalizationWeak(void)
+{
+  LOG(INFO) << "Set localization weak";
+  // slam_state_ = SlamState::SLAM_STATE_LOCATE_WEAK;
+
+  movexbot_msgs::androidConsole slam_state_msg;
+  slam_state_msg.model.data = "localization_weak";
   slam_state_msg.name.data = map_data_.map_name;
   slam_state_pub_.publish(slam_state_msg);
   dock_station_sub_.shutdown();
