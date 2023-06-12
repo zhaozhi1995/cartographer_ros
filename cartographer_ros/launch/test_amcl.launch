@@ -15,22 +15,41 @@
 -->
 
 <launch>
+  <param name="/use_sim_time" value="true" />
+  <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/test.bag"/> -->
+  <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/5f.bag"/> -->
+  <arg name="bag_filename" default="/home/movexbot/rosbag_test/Task/2028004/output.bag"/>
+  
+  <param name="robot_description"
+    textfile="$(find cartographer_ros)/urdf/demo.urdf" />
+
+  <node name="robot_state_publisher" pkg="robot_state_publisher"
+    type="robot_state_publisher" />
+
+  <include file="$(find amcl)/examples/amcl_diff.launch"/>
+
   <node name="cartographer_node" pkg="cartographer_ros"
       type="cartographer_node" args="
           -map_folder_path $(env WORK_FOLDER_PATH)/Map/
           -configuration_directory $(find cartographer_ros)/configuration_files
           -configuration_basename mapping.lua
           -configuration_basename_localization localization.lua
-          -use_manager=true
-          -use_lidar_relocalizer=false
+          -load_state_filename=''
           -use_neo_localization=false
-          -use_amcl_localization=false
-          -is_check_location_lost=false"
-      output="screen" respawn="true">
+          -use_amcl_localization=true
+          -use_manager=true"
+      output="screen">
     <remap from="scan" to="nav_scan" />
     <remap from="scan_1" to="nav_scan" />
     <remap from="scan_2" to="camera_3_scan" />
   </node>
-   <node name="cartographer_occupancy_grid_node" pkg="cartographer_ros"
-      type="cartographer_occupancy_grid_node" respawn="true"/>
+
+  <node name="rviz" pkg="rviz" type="rviz" required="true"
+      args="-d $(find cartographer_ros)/configuration_files/demo_2d.rviz" />
+  <node name="playbag" pkg="rosbag" type="play"
+      args="--clock -r 5 -s 0 $(arg bag_filename)" >
+      <remap from="/kitti/velo/pointcloud" to="/points2"/>
+      <remap from="/kitti/oxts/imu" to="/imu"/>
+  </node>
+
 </launch>

@@ -64,6 +64,7 @@ void Run() {
   Node node(node_options, std::move(map_builder), &tf_buffer,
             FLAGS_collect_metrics);
   if (!FLAGS_load_state_filename.empty()) {
+    LOG(INFO) << "load state file:" << FLAGS_load_state_filename;
     node.LoadState(FLAGS_load_state_filename, FLAGS_load_frozen_state);
   }
 

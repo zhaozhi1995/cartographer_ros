@@ -34,6 +34,8 @@
 #include <mutex>
 #include "lidar_localizer/LocalizerPostion.h"
 #include <movexbot_msgs/SlamStatus.h>
+#include <nav_msgs/SetMap.h>
+#include <movexbot_msgs/SendCmd.h>
 
 
 DEFINE_bool(collect_metrics, false,
@@ -66,6 +68,10 @@ DEFINE_bool(use_lidar_relocalizer, false,
             "whether use lidar realocalizer to relocate the robot in the whole map");
 DEFINE_bool(is_check_location_lost, true,
             "whether check location lost");
+DEFINE_bool(use_neo_localization, false,
+            "whether use neo_localization");
+DEFINE_bool(use_amcl_localization, false,
+            "whether use amcl localization");
 
 namespace cartographer_ros {
 
@@ -77,6 +83,7 @@ using ::cartographer::io::SubmapSlice;
 //TODO: 和上传的slam状态同步
 #define slam_state_ ::cartographer::io::slam_state
 #define MapNameFolderPath(map_name) FLAGS_map_folder_path + map_name + "/"
+std::string g_robot_id;
 
 class Manager
 {
@@ -97,9 +104,9 @@ private:
   TrajectoryOptions trajectory_options,trajectory_options_localization;
   tf2_ros::Buffer* tf_buffer_;
   ros::Subscriber initial_pose_sub_,app_initial_pose_sub_,emergency_stop_button_sub_,robot_pose_sub_,slam_state_sub_,dock_station_sub_;
-  ros::Publisher map_android_pub_,robot_grid_pos_pub_,map_pub_,slam_state_pub_,slam_status_pub_;
-  ros::ServiceServer relocalization_service_,slam_cmd_service_;
-  ros::ServiceClient lidar_localizer_client_;
+  ros::Publisher map_android_pub_,robot_grid_pos_pub_,map_pub_,slam_state_pub_,slam_status_pub_,initial_pose_pub_;
+  ros::ServiceServer relocalization_service_,slam_cmd_service_,save_map_service_;
+  ros::ServiceClient lidar_localizer_client_,neo_localization_client_,amcl_set_map_client_,amcl_localization_client_;
   geometry_msgs::PoseStamped robot_pose_;
   ros::NodeHandle nh_;
   MapData_t map_data_;
@@ -108,18 +115,20 @@ private:
   std::recursive_mutex node_mutex_;
   ros::WallTimer map_publish_timer_,slam_staus_pub_timer_;
   bool flag_emergency_stop_;
+	boost::mutex set_slam_cmd_mutex_;
   
   void StartMapping(std::string map_name,geometry_msgs::Pose initial_pose = geometry_msgs::Pose());
   void CloseMapping(std::string map_name);
   void StartLocalization(std::string map_name,geometry_msgs::Pose initial_pose = geometry_msgs::Pose());
-  void CloseLocalization(void);
+  void CloseLocalization(bool flag_pub_msg);
   void SetInitialPose(const geometry_msgs::Pose &pose);
   void SetLocalizationSucceed(void);
   void SetLocalizationWeak(void);
   void CancelLocalizationSucceed(void);
   void LocalizationLost(void);
-  void SaveMap(std::string map_name);
-  std::unique_ptr<nav_msgs::OccupancyGrid> GetOccupancyGridMap(float resolution);
+  bool SaveMap(std::string map_name,bool flag_is_from_map_topic);
+  bool SaveMapFromTopic(movexbot_msgs::SendCmd::Request &req, movexbot_msgs::SendCmd::Response &res);
+  nav_msgs::OccupancyGridConstPtr GetOccupancyGridMap(float resolution);
   bool RelocateWithDockMarker(const aruco_msgs::Marker &marker);
   void HandleInitialPose(const geometry_msgs::PoseWithCovarianceStamped &pose_msg);
   void HandleAppInitialPose(const movexbot_msgs::destination_point &pose_msg);
@@ -133,13 +142,22 @@ private:
 public:
   Manager(tf2_ros::Buffer* tf_buffer):flag_emergency_stop_(false)
   {
+    g_robot_id = getenv("ROBOT_ID");
     dock_station_.SetMapFolderPath(FLAGS_map_folder_path);
     tf_buffer_ = tf_buffer;
     std::tie(node_options, trajectory_options) = LoadOptions(FLAGS_configuration_directory, FLAGS_configuration_basename);
     std::tie(node_options, trajectory_options_localization) = LoadOptions(FLAGS_configuration_directory, FLAGS_configuration_basename_localization);
-    initial_pose_sub_ = nh_.subscribe("/initialpose",1, &Manager::HandleInitialPose,this);
+    if(FLAGS_use_neo_localization || FLAGS_use_amcl_localization)
+      initial_pose_pub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("/initialpose",1,true);
+    else
+      initial_pose_sub_ = nh_.subscribe("/initialpose",1, &Manager::HandleInitialPose,this);
     app_initial_pose_sub_ = nh_.subscribe("/nav/cmd/initPose", 1, &Manager::HandleAppInitialPose, this);
-    emergency_stop_button_sub_ = nh_.subscribe("/robot_state/scram_button",1,&Manager::EmergencyStopButton,this);
+    LOG(INFO) << "g_robot_id: " << g_robot_id;
+    if(g_robot_id < "M-SC60A-2301002" || (g_robot_id >= "M-SC60B-2025001" && g_robot_id <= "M-SC60B-2025010"))
+    {
+      LOG(INFO) << "sub /robot_state/scram_button topic";
+      emergency_stop_button_sub_ = nh_.subscribe("/robot_state/scram_button",1,&Manager::EmergencyStopButton,this);
+    }
     robot_pose_sub_ = nh_.subscribe("/tracked_pose",1, &Manager::HandleRobotPose,this);
     dock_station_sub_ = nh_.subscribe("/aruco_marker_publisher/markers",1,&Manager::HandleDockStation,this);
 
@@ -150,19 +168,30 @@ public:
     map_pub_ = nh_.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
     relocalization_service_ = nh_.advertiseService("slam/relocalization_service",&Manager::RelocalizationService,this);
     slam_cmd_service_ = nh_.advertiseService("slam/set_cmd",&Manager::SetSlamCmdService,this);
+    save_map_service_ = nh_.advertiseService("slam/save_map",&Manager::SaveMapFromTopic,this);
     // map_publish_timer_ = nh_.createWallTimer(ros::WallDuration(1.0),&Manager::MapPublish,this);
     slam_staus_pub_timer_ = nh_.createWallTimer(ros::WallDuration(1.0),&Manager::SlamStatusPublish,this);
 
     lidar_localizer_client_ = nh_.serviceClient<lidar_localizer::LocalizerPostion>("/localizer");
+		neo_localization_client_ = nh_.serviceClient<movexbot_msgs::SetSlamCmd>("/neo_localization_cmd");
+    amcl_set_map_client_ = nh_.serviceClient<nav_msgs::SetMap>("/set_map");
+    amcl_localization_client_ = nh_.serviceClient<movexbot_msgs::SetSlamCmd>("/amcl_localization_cmd");
 
     ros::Duration(0.5).sleep();
-    CloseLocalization();
+    CloseLocalization(true);
   };
   ~Manager(){}
 };
 
 bool Manager::SetSlamCmdService(movexbot_msgs::SetSlamCmd::Request &req,movexbot_msgs::SetSlamCmd::Response &res)
 {  
+	boost::mutex::scoped_lock lock(set_slam_cmd_mutex_, boost::try_to_lock);
+  if(!lock)
+  {
+    LOG(ERROR) << "set_slam_cmd is busy!";
+		res.state = res.STATE_SUCCESS;
+    return true;
+  }
   LOG(INFO) << GetFormatString("req.cmd:%d,slam_state:%d,map_name:%s",(int)req.cmd,(int)slam_state_,req.map_name.c_str());
   switch (req.cmd)
   {
@@ -171,7 +200,7 @@ bool Manager::SetSlamCmdService(movexbot_msgs::SetSlamCmd::Request &req,movexbot
         if(slam_state_ == SlamState::SLAM_STATE_MAPPING)
           CloseMapping(req.map_name);
         else if(slam_state_ == SlamState::SLAM_STATE_LOCATING || slam_state_ == SlamState::SLAM_STATE_RELOCATING || slam_state_ == SlamState::SLAM_STATE_LOCATE_SUCCEED)
-          CloseLocalization();
+          CloseLocalization(true);
       }
       break;
     case req.SLAM_CMD_LOCATING:
@@ -329,10 +358,10 @@ bool Manager::RelocalizationService(movexbot_msgs::Relocalization::Request &req,
   lidar_localizer_srv.request.min_score = 0.6;
   if(lidar_localizer_client_.call(lidar_localizer_srv))
   {
+    LOG(INFO) << "lidar relocate result: " << lidar_localizer_srv.response;
     if(lidar_localizer_srv.response.pose_found)
     {
       res.state = res.STATE_SUCCESS;
-      LOG(INFO) << "found lidar relocate pose: " << lidar_localizer_srv.response.pose.pose << ",score: " << lidar_localizer_srv.response.score;
       SetInitialPose(lidar_localizer_srv.response.pose.pose);
       {
         ros::Rate loop(100);
@@ -482,7 +511,7 @@ void Manager::HandleRobotPose(const geometry_msgs::PoseStamped &pose)
     robot_grid_pose.mapInfo.resolution = map_data_.app_map.resolution;
     robot_grid_pos_pub_.publish(robot_grid_pose);
   }
-  else  */if(slam_state_ == SlamState::SLAM_STATE_LOCATE_SUCCEED)
+  else  */if(!FLAGS_use_neo_localization && !FLAGS_use_amcl_localization && slam_state_ == SlamState::SLAM_STATE_LOCATE_SUCCEED)
   {
     static int last_check_node_count = 0;
     if(cartographer::io::invalid_node_count > 100)
@@ -564,7 +593,7 @@ void Manager::MapPublish(const ros::WallTimerEvent& event)
   std::lock_guard<std::recursive_mutex> lock(node_mutex_, std::adopt_lock);
 //LOG(ERROR) << "test";
   ros::Time start = ros::Time::now();
-  std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(map_data_.mapping_resolution);
+  nav_msgs::OccupancyGridConstPtr map = GetOccupancyGridMap(map_data_.mapping_resolution);
   if(map->data.empty())
   {
     ROS_ERROR("empty data of map!!");
@@ -635,7 +664,7 @@ void Manager::SlamStatusPublish(const ros::WallTimerEvent& event)
   slam_status_pub_.publish(slam_status);
 }
 
-std::unique_ptr<nav_msgs::OccupancyGrid> Manager::GetOccupancyGridMap(float resolution)
+nav_msgs::OccupancyGridConstPtr Manager::GetOccupancyGridMap(float resolution)
 {
   auto &submap_slices = *(node_->GetMapBuilderBridge()->GetSubmapSlice());
   auto painted_slices = PaintSubmapSlices(submap_slices, resolution);
@@ -648,16 +677,17 @@ void Manager::StartMapping(std::string map_name,geometry_msgs::Pose initial_pose
   LOG(INFO) << "inital_pose:" << initial_pose;
   std::lock_guard<std::recursive_mutex> lock(node_mutex_);
   LOG(INFO) << "lock out";
-  if(node_)
-  {
-    //LOG(ERROR) << "test";
-    node_->FinishAllTrajectories();
-    LOG(ERROR) << "FinishAllTrajectories...";
-    node_->WaitFinishAllTrajectories();
-    LOG(INFO) << "reset node ...";
-    node_.reset();
-    LOG(INFO) << "reset node done";
-  }
+  // if(node_)
+  // {
+  //   //LOG(ERROR) << "test";
+  //   node_->FinishAllTrajectories();
+  //   LOG(ERROR) << "FinishAllTrajectories...";
+  //   node_->WaitFinishAllTrajectories();
+  //   LOG(INFO) << "reset node ...";
+  //   node_.reset();
+  //   LOG(INFO) << "reset node done";
+  // }
+  CloseLocalization(false);
   //LOG(ERROR) << "test";
   map_data_.app_map_size_max = 200000; //png compress will decrease data size tenfold
   auto map_builder = cartographer::mapping::CreateMapBuilder(node_options.map_builder_options);
@@ -665,7 +695,7 @@ void Manager::StartMapping(std::string map_name,geometry_msgs::Pose initial_pose
   if(!map_name.empty() && boost::filesystem::exists(MapNameFolderPath(map_name) + map_name + ".pbstream")) //extend map
   {
     node_->LoadState(MapNameFolderPath(map_name) + map_name + ".pbstream",FLAGS_load_frozen_state);
-    std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(FLAGS_resolution);
+    nav_msgs::OccupancyGridConstPtr map = GetOccupancyGridMap(FLAGS_resolution);
     map_data_.mapping_resolution = sqrt((float)map->data.size() / map_data_.app_map_size_max) * FLAGS_resolution;
   }
   else
@@ -702,6 +732,8 @@ void Manager::CloseMapping(std::string map_name)
     LOG(WARNING) << "node_ is null";
     return;
   }
+  //get current robot pose
+  // geometry_msgs::Pose robot_pose = ros::topic::waitForMessage<geometry_msgs::Pose>("/tracked_pose");
 //LOG(ERROR) << "test";
   slam_state_ = SlamState::SLAM_STATE_STANDBY;
   node_->FinishAllTrajectories();
@@ -711,7 +743,7 @@ void Manager::CloseMapping(std::string map_name)
   if (!map_name.empty() && !FLAGS_map_folder_path.empty()) 
   {
     node_->RunFinalOptimization();
-    SaveMap(map_name);
+    SaveMap(map_name,false);
   }
   LOG(INFO) << "reset node ...";
   node_.reset();
@@ -728,17 +760,18 @@ void Manager::CloseMapping(std::string map_name)
   else
   {
     StartLocalization(map_name,robot_pose_.pose);
-    SetLocalizationSucceed();
+    // SetLocalizationSucceed();
   }
 }
 
 void Manager::StartLocalization(std::string map_name,geometry_msgs::Pose initial_pose)
 {
-  LOG(INFO) << "start localization!map name:" << map_name;
+  LOG(INFO) << "start localization!map name:" << map_name << ",initial_pose:" << initial_pose;
   std::lock_guard<std::recursive_mutex> lock(node_mutex_);
   LOG(WARNING) << "lock out";
   if(map_name.empty() || FLAGS_map_folder_path.empty())
     return;
+    
   if(node_)
   {
     node_->FinishAllTrajectories();
@@ -748,7 +781,7 @@ void Manager::StartLocalization(std::string map_name,geometry_msgs::Pose initial
     node_.reset();
     LOG(INFO) << "reset node done";
   }
-  if(!boost::filesystem::exists(MapNameFolderPath(map_name) + map_name + ".pbstream"))
+  if(!FLAGS_use_amcl_localization && !FLAGS_use_neo_localization && !boost::filesystem::exists(MapNameFolderPath(map_name) + map_name + ".pbstream"))
   {
     ROS_ERROR("the pbstream file is not exist,return!");
     return;
@@ -756,26 +789,101 @@ void Manager::StartLocalization(std::string map_name,geometry_msgs::Pose initial
 //LOG(ERROR) << "test";
   map_data_.map_name = map_name;
   slam_state_ = SlamState::SLAM_STATE_LOCATING;
-  
-  auto map_builder = cartographer::mapping::CreateMapBuilder(node_options.map_builder_options);
-  node_ = boost::shared_ptr<Node>(new Node(node_options, std::move(map_builder), tf_buffer_,
-            FLAGS_collect_metrics));
-  node_->LoadState(MapNameFolderPath(map_name) + map_name + ".pbstream",
-                  FLAGS_load_frozen_state);
-  std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(FLAGS_resolution);
-  map_data_.map_info = map->info;
-//LOG(ERROR) << "test";
-  if (FLAGS_start_trajectory_with_default_topics) {
-    const auto pose = ToRigid3d(initial_pose);
-    if (pose.IsValid()) {
-      ::cartographer::mapping::proto::InitialTrajectoryPose initial_trajectory_pose;
-      initial_trajectory_pose.set_to_trajectory_id(0);
-      *initial_trajectory_pose.mutable_relative_pose() = cartographer::transform::ToProto(pose);
-      initial_trajectory_pose.set_timestamp(cartographer::common::ToUniversal(::cartographer_ros::FromRos(ros::Time(0))));
-      *trajectory_options_localization.trajectory_builder_options.mutable_initial_trajectory_pose() = initial_trajectory_pose;
+  movexbot_msgs::SlamStatus slam_status;
+  slam_status.slam_state = slam_state_;
+  slam_status.map_name = map_data_.map_name;
+  slam_status_pub_.publish(slam_status); //给occupancy grid map发送状态,防止多发map,需要修改策略
+	
+	if(FLAGS_use_neo_localization)
+	{
+    ros::Duration(1.0).sleep();
+    nav_msgs::OccupancyGrid map;
+    if(GetMapFromPNG(map_name,map,false))
+    {
+      map_data_.map_info = map.info;
+      map_pub_.publish(map);
     }
-    node_->StartTrajectoryWithDefaultTopics(trajectory_options_localization);
+    else
+      return;
+		LOG(INFO) << "use neo localization";
+		movexbot_msgs::SetSlamCmd neo_localization_request_;
+		neo_localization_request_.request.cmd = neo_localization_request_.request.SLAM_CMD_LOCATING;
+		neo_localization_request_.request.map_name = map_name;
+    if(initial_pose.orientation.w != 0)
+    {
+      neo_localization_request_.request.robot_pose.x = initial_pose.position.x;
+      neo_localization_request_.request.robot_pose.y = initial_pose.position.y;
+      neo_localization_request_.request.robot_pose.theta = tf::getYaw(initial_pose.orientation);
+    }
+    if(neo_localization_client_.waitForExistence(ros::Duration(2.0)))
+    {
+      if(neo_localization_client_.call(neo_localization_request_))
+      {
+        LOG(INFO) << "start neo localization success";
+        
+      }
+      else
+        LOG(ERROR) << "start neo localization failed";
+    }
+    else
+      LOG(ERROR) << "connect to neo localization cmd server timeout";
+	}
+  else if(FLAGS_use_amcl_localization)
+  {
+    ros::Duration(1.0).sleep();
+    nav_msgs::OccupancyGrid map;
+    if(GetMapFromPNG(map_name,map,false))
+    {
+      map_data_.map_info = map.info;
+      map_pub_.publish(map);
+    }
+    else
+      return;
+		LOG(INFO) << "use amcl localization";
+		nav_msgs::SetMap amcl_localization_request_;
+		amcl_localization_request_.request.map = map;
+    amcl_localization_request_.request.initial_pose.header.frame_id = "map";
+    amcl_localization_request_.request.initial_pose.header.stamp = ros::Time::now();
+    amcl_localization_request_.request.initial_pose.pose.pose = initial_pose;
+    if(amcl_localization_request_.request.initial_pose.pose.pose.orientation.w == 0)
+      amcl_localization_request_.request.initial_pose.pose.pose.orientation.w = 1;
+    if(amcl_set_map_client_.waitForExistence(ros::Duration(2.0)))
+    {
+      if(amcl_set_map_client_.call(amcl_localization_request_))
+      {
+        LOG(INFO) << "start amcl localization success";
+        
+      }
+      else
+        LOG(ERROR) << "start amcl localization failed";
+    }
+    else
+      LOG(ERROR) << "connect to amcl localization cmd server timeout";
   }
+	else
+	{
+		LOG(INFO) << "use cartographer localization";
+		auto map_builder = cartographer::mapping::CreateMapBuilder(node_options.map_builder_options);
+		node_ = boost::shared_ptr<Node>(new Node(node_options, std::move(map_builder), tf_buffer_,
+							FLAGS_collect_metrics));
+		node_->LoadState(MapNameFolderPath(map_name) + map_name + ".pbstream",
+										FLAGS_load_frozen_state);
+    nav_msgs::OccupancyGridConstPtr map = GetOccupancyGridMap(FLAGS_resolution);
+    map_data_.map_info = map->info;
+	//LOG(ERROR) << "test";
+		if (FLAGS_start_trajectory_with_default_topics) {
+			const auto pose = ToRigid3d(initial_pose);
+			if (pose.IsValid()) {
+				::cartographer::mapping::proto::InitialTrajectoryPose initial_trajectory_pose;
+				initial_trajectory_pose.set_to_trajectory_id(0);
+				*initial_trajectory_pose.mutable_relative_pose() = cartographer::transform::ToProto(pose);
+				initial_trajectory_pose.set_timestamp(cartographer::common::ToUniversal(::cartographer_ros::FromRos(ros::Time(0))));
+				*trajectory_options_localization.trajectory_builder_options.mutable_initial_trajectory_pose() = initial_trajectory_pose;
+			}
+			node_->StartTrajectoryWithDefaultTopics(trajectory_options_localization);
+		}
+    map_pub_.publish(*map);
+	}
 // LOG(ERROR) << "test";
   dock_station_sub_ = nh_.subscribe("/aruco_marker_publisher/markers",1,&Manager::HandleDockStation,this);
 // LOG(ERROR) << "test";
@@ -784,7 +892,6 @@ void Manager::StartLocalization(std::string map_name,geometry_msgs::Pose initial
   slam_state_msg.name.data = map_name;
   slam_state_pub_.publish(slam_state_msg);
   ros::Duration(1.0).sleep(); //TODO:为了等待上传到app的信号改变，后续优化涉及到和navigation中的slam状态同步问题
-  map_pub_.publish(*map);
 }
 
 void Manager::SetLocalizationSucceed(void)
@@ -837,12 +944,38 @@ void Manager::LocalizationLost(void)
   dock_station_sub_ = nh_.subscribe("/aruco_marker_publisher/markers",1,&Manager::HandleDockStation,this);
 }
 
-void Manager::CloseLocalization(void)
+void Manager::CloseLocalization(bool flag_pub_msg)
 {
   LOG(ERROR) << "close localization!";
   std::lock_guard<std::recursive_mutex> lock(node_mutex_);
   LOG(WARNING) << "lock out";
-  if(node_)
+
+  if(FLAGS_use_neo_localization)
+	{
+		LOG(INFO) << "use neo localization";
+		movexbot_msgs::SetSlamCmd neo_localization_request_;
+		neo_localization_request_.request.cmd = neo_localization_request_.request.SLAM_CMD_STANDBY;
+		if(neo_localization_client_.call(neo_localization_request_))
+		{
+			LOG(INFO) << "stop neo localization success";
+			
+		}
+    else
+      LOG(ERROR) << "stop neo localization failed";
+	}
+  else if(FLAGS_use_amcl_localization)
+  {
+    LOG(INFO) << "use amcl localization";
+    movexbot_msgs::SetSlamCmd amcl_localization_request_;
+    amcl_localization_request_.request.cmd = amcl_localization_request_.request.SLAM_CMD_STANDBY;
+    if(amcl_localization_client_.call(amcl_localization_request_))
+    {
+      LOG(INFO) << "stop amcl localization success";
+    }
+    else
+      LOG(ERROR) << "stop amcl localization failed";
+  }
+  else if(node_)
   {
     node_->FinishAllTrajectories();
     node_->WaitFinishAllTrajectories();
@@ -852,35 +985,50 @@ void Manager::CloseLocalization(void)
     slam_state_ = SlamState::SLAM_STATE_STANDBY;
   }
 
-  movexbot_msgs::androidConsole slam_state_msg;
-  slam_state_msg.model.data = "localization_close";
-  slam_state_pub_.publish(slam_state_msg);
-  dock_station_sub_.shutdown();
-  LOG(ERROR) << "localization_close";
+  if(flag_pub_msg)
+  {
+    movexbot_msgs::androidConsole slam_state_msg;
+    slam_state_msg.model.data = "localization_close";
+    slam_state_pub_.publish(slam_state_msg);
+    dock_station_sub_.shutdown();
+    LOG(ERROR) << "localization_close";
+  }
 }
 
 void Manager::SetInitialPose(const geometry_msgs::Pose &initial_pose)
 {
-  if(!node_)
-    return;
-  LOG(INFO) << GetFormatString("initial_pose:(%f,%f,%f)",initial_pose.position.x,initial_pose.position.y,tf::getYaw(initial_pose.orientation));
-  slam_state_ = SlamState::SLAM_STATE_RELOCATING;
-  node_->FinishLastTrajectory(); //TODO: delete the last trajectory to avoid memory increase
-  TrajectoryOptions initial_pose_trajectory_options_localization = trajectory_options_localization;
-
-  const auto pose = ToRigid3d(initial_pose);
-  if (!pose.IsValid()) {
-    LOG(ERROR) << "Invalid pose argument. Orientation quaternion must be normalized.";
-    return;
+  LOG(INFO) << "Set initial pose: " << initial_pose;
+  if(FLAGS_use_neo_localization || FLAGS_use_amcl_localization)
+  {
+    geometry_msgs::PoseWithCovarianceStamped initial_pose_stamped;
+    initial_pose_stamped.header.stamp = ros::Time::now();
+    initial_pose_stamped.header.frame_id = "map";
+    initial_pose_stamped.pose.pose = initial_pose;
+    initial_pose_pub_.publish(initial_pose_stamped);
   }
+  else
+  {
+    if(!node_)
+      return;
+    LOG(INFO) << GetFormatString("initial_pose:(%f,%f,%f)",initial_pose.position.x,initial_pose.position.y,tf::getYaw(initial_pose.orientation));
+    slam_state_ = SlamState::SLAM_STATE_RELOCATING;
+    node_->FinishLastTrajectory(); //TODO: delete the last trajectory to avoid memory increase
+    TrajectoryOptions initial_pose_trajectory_options_localization = trajectory_options_localization;
 
-  ::cartographer::mapping::proto::InitialTrajectoryPose initial_trajectory_pose;
-  initial_trajectory_pose.set_to_trajectory_id(0);
-  *initial_trajectory_pose.mutable_relative_pose() = cartographer::transform::ToProto(pose);
-  initial_trajectory_pose.set_timestamp(cartographer::common::ToUniversal(::cartographer_ros::FromRos(ros::Time(0))));
-  *initial_pose_trajectory_options_localization.trajectory_builder_options.mutable_initial_trajectory_pose() = initial_trajectory_pose;
+    const auto pose = ToRigid3d(initial_pose);
+    if (!pose.IsValid()) {
+      LOG(ERROR) << "Invalid pose argument. Orientation quaternion must be normalized.";
+      return;
+    }
 
-  node_->StartTrajectoryWithDefaultTopics(initial_pose_trajectory_options_localization);
+    ::cartographer::mapping::proto::InitialTrajectoryPose initial_trajectory_pose;
+    initial_trajectory_pose.set_to_trajectory_id(0);
+    *initial_trajectory_pose.mutable_relative_pose() = cartographer::transform::ToProto(pose);
+    initial_trajectory_pose.set_timestamp(cartographer::common::ToUniversal(::cartographer_ros::FromRos(ros::Time(0))));
+    *initial_pose_trajectory_options_localization.trajectory_builder_options.mutable_initial_trajectory_pose() = initial_trajectory_pose;
+
+    node_->StartTrajectoryWithDefaultTopics(initial_pose_trajectory_options_localization);
+  }
 }
 
 void UpdataVirtualWallPointCoor(const std::string &map_name, const Coordinate_t &png_coordinate_add)
@@ -941,7 +1089,7 @@ void UpdataTaskPointCoor(const std::string &map_name, const Coordinate_t &png_co
   }
 }
 
-void Manager::SaveMap(std::string map_name)
+bool Manager::SaveMap(std::string map_name,bool flag_is_from_map_topic)
 {
   bool is_new_map;
   std::string map_name_folder_path = MapNameFolderPath(map_name);
@@ -952,11 +1100,29 @@ void Manager::SaveMap(std::string map_name)
     mkdir(map_name_folder_path.c_str(),S_IRWXU | S_IRWXG | S_IRWXO);
   }
   else
+  {
     is_new_map = false;
-  node_->SerializeState(map_name_folder_path + map_name + ".pbstream",true /* include_unfinished_submaps */);
-  
-  /*******************save png****************/
-  std::unique_ptr<nav_msgs::OccupancyGrid> map = GetOccupancyGridMap(FLAGS_resolution);
+    if(flag_is_from_map_topic)
+      return false;
+  }
+
+  nav_msgs::OccupancyGridConstPtr map;
+  if(flag_is_from_map_topic)
+  {
+    map = ros::topic::waitForMessage<nav_msgs::OccupancyGrid>("/map");
+  }
+  else
+  {
+    node_->SerializeState(map_name_folder_path + map_name + ".pbstream",true /* include_unfinished_submaps */);
+    map = GetOccupancyGridMap(FLAGS_resolution);
+  }
+  if(!map)
+  {
+    LOG(ERROR) << "Get map failed";
+    return false;
+  }
+
+
   cv::Mat colorMat = OccupancyGridToMat(*map);
   std::vector<int> compression_params;
   compression_params.push_back(cv::IMWRITE_PNG_COMPRESSION);
@@ -964,12 +1130,12 @@ void Manager::SaveMap(std::string map_name)
   if(!cv::imwrite(map_name_folder_path + map_name + ".png", colorMat, compression_params))
   {
     LOG(ERROR) << "save map.png error:" << map_name_folder_path + map_name;
-    return;
+    return false;
   }
   cv::imwrite(map_name_folder_path + map_name + "_temp.png", colorMat, compression_params);
 
   //rewrite coordinate of all map data if zero point of png is changed
-  if(!is_new_map)
+  if(!flag_is_from_map_topic && !is_new_map)
   {
     LOG(INFO) << "Update map data...";
     MapInfo_t map_info = GetMapInfoFromYaml(map_name_folder_path  + map_name + ".yaml");
@@ -998,7 +1164,18 @@ void Manager::SaveMap(std::string map_name)
           map->info.origin.position.x, map->info.origin.position.y, tf::getYaw(map->info.origin.orientation));
   fclose(yaml);
 
-  ROS_INFO("map saved done!");
+  LOG(INFO) << "map saved done!";
+  return true;
+}
+
+//save map from map topic
+bool Manager::SaveMapFromTopic(movexbot_msgs::SendCmd::Request &req, movexbot_msgs::SendCmd::Response &res)
+{
+  if(SaveMap(req.value,true))
+    res.state = res.STATE_SUCCESS;
+  else
+    res.state = res.STATE_ERROR;
+  return true;
 }
 
 }  // namespace cartographer_ros

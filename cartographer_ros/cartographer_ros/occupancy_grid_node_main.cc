@@ -119,7 +119,7 @@ Node::Node(const double resolution, const double publish_period_sec)
       occupancy_grid_publisher_(
           node_handle_.advertise<::nav_msgs::OccupancyGrid>(
               FLAGS_occupancy_grid_topic, kLatestOnlyPublisherQueueSize,
-              true /* latched */)),
+              false /* latched */)),
       occupancy_grid_publisher_timer_(
           node_handle_.createWallTimer(::ros::WallDuration(publish_period_sec),
                                        &Node::DrawAndPublish, this)) {
