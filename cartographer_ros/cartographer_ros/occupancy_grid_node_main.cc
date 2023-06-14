@@ -37,7 +37,7 @@
 #include "nav_msgs/OccupancyGrid.h"
 #include "ros/ros.h"
 
-#include <lib/Common.hpp>
+#include <mx_common/Common.hpp>
 #include "movexbot_msgs/mapAndroid.h"
 #include "movexbot_msgs/mapInfo.h"
 #include "movexbot_msgs/robotPos.h"

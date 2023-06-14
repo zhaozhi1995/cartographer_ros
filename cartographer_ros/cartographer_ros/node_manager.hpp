@@ -27,8 +27,8 @@
 #include <yaml-cpp/yaml.h>
 #include <thread>
 #include <aruco_msgs/MarkerArray.h>
-#include <lib/StationID.hpp>
-#include <lib/Common.hpp>
+#include <mx_common/StationID.hpp>
+#include <mx_common/Common.hpp>
 #include <movexbot_msgs/Relocalization.h>
 #include <movexbot_msgs/SetSlamCmd.h>
 #include <mutex>
@@ -192,7 +192,8 @@ bool Manager::SetSlamCmdService(movexbot_msgs::SetSlamCmd::Request &req,movexbot
 		res.state = res.STATE_SUCCESS;
     return true;
   }
-  LOG(INFO) << GetFormatString("req.cmd:%d,slam_state:%d,map_name:%s",(int)req.cmd,(int)slam_state_,req.map_name.c_str());
+  LOG(INFO) << "slam_state:" << (int)slam_state_;
+  LOG(INFO) << "set slam cmd: " << req;
   switch (req.cmd)
   {
     case req.SLAM_CMD_STANDBY:
@@ -234,6 +235,25 @@ bool Manager::SetSlamCmdService(movexbot_msgs::SetSlamCmd::Request &req,movexbot
         break;
       }
     
+    case req.SLAM_CMD_TEST_EXTEND_MAPPING:
+      {
+        geometry_msgs::Pose initial_pose;
+        initial_pose.position.x = req.robot_pose.x;
+        initial_pose.position.y = req.robot_pose.y;
+        initial_pose.orientation = tf::createQuaternionMsgFromYaw(req.robot_pose.theta);
+        StartMapping(req.map_name, initial_pose);
+      }
+      break;
+
+    case req.SLAM_CMD_TEST_LOCALIZATION:
+      {
+        geometry_msgs::Pose initial_pose;
+        initial_pose.position.x = req.robot_pose.x;
+        initial_pose.position.y = req.robot_pose.y;
+        initial_pose.orientation = tf::createQuaternionMsgFromYaw(req.robot_pose.theta);
+        StartLocalization(req.map_name, initial_pose);
+      }
+      break;
     default:
       break;
   }
@@ -1100,16 +1120,12 @@ bool Manager::SaveMap(std::string map_name,bool flag_is_from_map_topic)
     mkdir(map_name_folder_path.c_str(),S_IRWXU | S_IRWXG | S_IRWXO);
   }
   else
-  {
     is_new_map = false;
-    if(flag_is_from_map_topic)
-      return false;
-  }
 
   nav_msgs::OccupancyGridConstPtr map;
   if(flag_is_from_map_topic)
   {
-    map = ros::topic::waitForMessage<nav_msgs::OccupancyGrid>("/map");
+    map = ros::topic::waitForMessage<nav_msgs::OccupancyGrid>("/map",ros::Duration(5));
   }
   else
   {
@@ -1135,7 +1151,7 @@ bool Manager::SaveMap(std::string map_name,bool flag_is_from_map_topic)
   cv::imwrite(map_name_folder_path + map_name + "_temp.png", colorMat, compression_params);
 
   //rewrite coordinate of all map data if zero point of png is changed
-  if(!flag_is_from_map_topic && !is_new_map)
+  if(!is_new_map)
   {
     LOG(INFO) << "Update map data...";
     MapInfo_t map_info = GetMapInfoFromYaml(map_name_folder_path  + map_name + ".yaml");

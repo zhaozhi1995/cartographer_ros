@@ -185,12 +185,13 @@ void Node::WaitFinishAllTrajectories() {
       LOG(WARNING) << "trajectories are not all finished";
       ros::WallDuration(0.5).sleep();
     }
-    if((ros::WallTime::now() - start_time).toSec() > 5.0)
-    {
-      LOG(ERROR) << "wait for finish all trajectory more than 5s, break";
-      break;
-    }
+    // if((ros::WallTime::now() - start_time).toSec() > 60.0)
+    // {
+    //   LOG(ERROR) << "wait for finish all trajectory more than 60s, break";
+    //   break;
+    // }
   }
+  LOG(INFO) << "watch for finish all trajectory done";
 }
 //end
 

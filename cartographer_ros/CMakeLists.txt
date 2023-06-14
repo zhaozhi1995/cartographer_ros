@@ -35,10 +35,10 @@ set(PACKAGE_DEPENDENCIES
   visualization_msgs
   movexbot_msgs
   aruco_msgs
-  navigation
+  mx_common
   lidar_localizer
 )
-
+SET(CMAKE_BUILD_TYPE "Release")
 if(WIN32)
   set(Boost_USE_STATIC_LIBS FALSE)
 endif()

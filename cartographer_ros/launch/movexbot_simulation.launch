@@ -18,7 +18,7 @@
   <param name="/use_sim_time" value="true" />
   <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/test.bag"/> -->
   <!-- <arg name="bag_filename" default="/media/zz/99a6b4a4-10ae-40e5-91e0-01bbaee2f4d6/zz/bag/5f.bag"/> -->
-  <arg name="bag_filename" default="/home/movexbot/rosbag_test/Mapping/Mapping_灵山控制中心_2023-02-28-10-38-53.bag"/>  
+  <arg name="bag_filename" default="/home/movexbot/rosbag_test/Mapping/2304001/Mapping_Globus-complet_2023-06-13-11-32-12.bag"/>  
   
   <!-- <param name="robot_description"
     textfile="$(find cartographer_ros)/urdf/demo.urdf" />
@@ -34,7 +34,8 @@
           -configuration_basename_localization localization.lua
           -load_state_filename=''
           -use_neo_localization=false
-          -use_manager=false"
+          -use_amcl_localization=false
+          -use_manager=true"
       output="screen">
     <remap from="scan" to="nav_scan" />
     <remap from="scan_1" to="nav_scan" />
@@ -44,7 +45,7 @@
   <node name="rviz" pkg="rviz" type="rviz" required="true"
       args="-d $(find cartographer_ros)/configuration_files/demo_2d.rviz" />
   <node name="playbag" pkg="rosbag" type="play"
-      args="--clock -r 5 -s 0 $(arg bag_filename)" >
+      args="--clock --pause -r 2 -s 0 $(arg bag_filename)" >
       <remap from="/kitti/velo/pointcloud" to="/points2"/>
       <remap from="/kitti/oxts/imu" to="/imu"/>
   </node>
