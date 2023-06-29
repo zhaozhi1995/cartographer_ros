@@ -652,7 +652,7 @@ void Manager::MapPublish(const ros::WallTimerEvent& event)
   // cv::imshow("a",mat);
   // cv::waitKey(1);
   //LOG(ERROR) << "test";
-  static std::vector<int> compression_params = {CV_IMWRITE_PNG_COMPRESSION,5};
+  static std::vector<int> compression_params = {cv::IMWRITE_PNG_COMPRESSION,5};
   std::vector<uchar> data_encode;
   start = ros::Time::now();
   cv::imencode(".png", mat, data_encode,compression_params);

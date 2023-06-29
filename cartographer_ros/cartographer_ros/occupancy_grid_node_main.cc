@@ -294,7 +294,7 @@ void Node::DrawAndPublish(const ::ros::WallTimerEvent& unused_timer_event) {
   // cv::imshow("a",mat);
   // cv::waitKey(1);
   //LOG(ERROR) << "test";
-  static std::vector<int> compression_params = {CV_IMWRITE_PNG_COMPRESSION,5};
+  static std::vector<int> compression_params = {cv::IMWRITE_PNG_COMPRESSION,5};
   std::vector<uchar> data_encode;
   cv::imencode(".png", mat, data_encode,compression_params);
   movexbot_msgs::mapAndroid map_android;
